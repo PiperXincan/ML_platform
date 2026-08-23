@@ -1,0 +1,5 @@
+tmp/
+*.pdf
+*.docx
+__pycache__/
+*.pyc
