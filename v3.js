@@ -62,7 +62,16 @@ function makeResults(task, count) {
 }
 let state;
 try { state = JSON.parse(localStorage.getItem('mlStudioV3')) || initialState(); } catch { state = initialState(); }
-function save() { localStorage.setItem('mlStudioV3', JSON.stringify(state)); }
+const defaultState = initialState();
+if (!state || typeof state !== 'object' || Array.isArray(state)) state = defaultState;
+state.projects = Array.isArray(state.projects) ? state.projects : defaultState.projects;
+state.datasets = state.datasets && typeof state.datasets === 'object' && !Array.isArray(state.datasets) ? state.datasets : defaultState.datasets;
+state.experiments = state.experiments && typeof state.experiments === 'object' && !Array.isArray(state.experiments) ? state.experiments : defaultState.experiments;
+if (!state.projects.length && !['home', 'projects'].includes(state.page)) state.page = 'home';
+function save() {
+  try { localStorage.setItem('mlStudioV3', JSON.stringify(state)); }
+  catch (error) { console.warn('本地保存不可用，页面将继续使用当前会话数据。', error); }
+}
 function project() { return state.projects.find(item => item.id === state.projectId) || state.projects[0]; }
 function dataset() { return state.datasets[state.datasetId] || state.datasets[project()?.datasets?.[0]]; }
 function experiment() { return state.experiments[state.experimentId] || state.experiments[dataset()?.experiments?.[0]]; }
