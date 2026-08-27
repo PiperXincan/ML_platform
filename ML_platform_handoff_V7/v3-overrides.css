@@ -1,0 +1,115 @@
+.project-link {
+  position: relative;
+  width: 100%;
+  display: block;
+  padding: 0;
+  background: transparent;
+}
+
+.project-main {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: #aeb9cc;
+  padding: 9px;
+  border-radius: 9px;
+  text-align: left;
+}
+
+.project-main > span {
+  width: 25px;
+  height: 25px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: #263451;
+  color: #86aefc;
+  font-weight: 800;
+  font-size: 11px;
+}
+
+.project-main > b {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-link:hover,
+.project-link.selected {
+  background: transparent;
+}
+
+.project-link:hover .project-main,
+.project-link.selected .project-main {
+  background: #1d2942;
+  color: #fff;
+}
+
+.project-popover {
+  display: block;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .16s ease, visibility 0s linear .46s;
+  transition-delay: .3s;
+}
+
+.project-link:hover .project-popover {
+  display: block;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: .3s;
+}
+
+.popover-tabs button.active {
+  background: var(--blue);
+  color: #fff;
+}
+
+.popover-panel {
+  display: none;
+  text-align: left;
+  padding: 10px 3px 3px;
+}
+
+.popover-panel.active {
+  display: block;
+}
+
+.popover-panel p,
+.popover-panel small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.popover-dataset {
+  margin-top: 7px;
+}
+
+.mini-preview {
+  display: grid;
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.mini-preview > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.mini-preview span {
+  padding: 6px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
