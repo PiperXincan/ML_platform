@@ -1,6 +1,11 @@
 state.resultVisibleMetrics = recordV7(state.resultVisibleMetrics);
 state.libraryVisibleMetrics = recordV7(state.libraryVisibleMetrics);
-state.libraryMetricScope = ['train', 'validation'].includes(state.libraryMetricScope) ? state.libraryMetricScope : 'validation';
+state.resultScope = 'validation';
+state.libraryMetricScope = 'validation';
+state.resultCompareTraining = Boolean(state.resultCompareTraining);
+state.libraryCompareTraining = Boolean(state.libraryCompareTraining);
+state.metricPickerOpenV8 = null;
+state.libraryDetailExperimentId = typeof state.libraryDetailExperimentId === 'string' ? state.libraryDetailExperimentId : null;
 
 const previousShellV8 = shell;
 shell = function (content) {
@@ -28,6 +33,12 @@ const metricCatalogV8 = {
 
 const gapMetricV8 = { key: 'gap', label: '训练 / 验证差值', direction: '越小通常越稳定', short: '训练集与验证集表现差距，越小通常越稳定。', full: '用于辅助观察过拟合风险，不设置跨模型、跨数据集的固定优劣阈值。' };
 
+function overfitMetricV8(task = project()?.task || 'classification') {
+  return task === 'regression'
+    ? { key: 'overfitGap', label: 'RMSE 差值', direction: '越接近 0 通常越稳定', short: '验证集 RMSE 减去训练集 RMSE，用于辅助观察过拟合风险。', full: '展示验证集 RMSE 与训练集 RMSE 的方向性差值，并同时给出相对差距；正值越大表示验证误差相对训练误差上升越明显。' }
+    : { key: 'overfitGap', label: 'AUC 差值', direction: '越接近 0 通常越稳定', short: '训练集 AUC 减去验证集 AUC，用于辅助观察过拟合风险。', full: '展示训练集 AUC 与验证集 AUC 的方向性差值；正值越大表示验证集区分能力相对训练集下降越明显。' };
+}
+
 function taskMetricsV8(task = project()?.task || 'classification') {
   return metricCatalogV8[task] || metricCatalogV8.classification;
 }
@@ -35,23 +46,88 @@ function taskMetricsV8(task = project()?.task || 'classification') {
 function selectedMetricsV8(area, task = project()?.task || 'classification') {
   const store = area === 'library' ? state.libraryVisibleMetrics : state.resultVisibleMetrics;
   const defaults = task === 'regression' ? ['rmse', 'r2'] : ['auc', 'f1'];
-  const valid = new Set(taskMetricsV8(task).map(metric => metric.key));
+  const valid = new Set([...taskMetricsV8(task), overfitMetricV8(task)].map(metric => metric.key));
   const saved = Array.isArray(store[task]) ? store[task].filter(key => valid.has(key)) : [];
   store[task] = saved.length ? saved : defaults;
   return store[task];
 }
 
 function metricByKeyV8(key, task = project()?.task || 'classification') {
-  return key === 'gap' ? gapMetricV8 : taskMetricsV8(task).find(metric => metric.key === key);
+  return key === 'overfitGap' ? overfitMetricV8(task) : taskMetricsV8(task).find(metric => metric.key === key);
 }
 
 function metricPickerV8(area, task) {
   const selected = selectedMetricsV8(area, task);
-  return `<details class="metric-picker"><summary>显示指标（${selected.length}）</summary><div class="metric-picker-menu">${taskMetricsV8(task).map(metric => `<label><input type="checkbox" data-v8-metric-area="${area}" data-v8-metric-key="${metric.key}" ${selected.includes(metric.key) ? 'checked' : ''}><span>${metric.label}</span><i title="${esc(metric.short)}">ⓘ</i></label>`).join('')}</div></details>`;
+  const available = [...taskMetricsV8(task), overfitMetricV8(task)];
+  return `<details class="metric-picker" data-v8-picker-area="${area}"><summary>显示指标（${selected.length}/${available.length}）</summary><div class="metric-picker-menu">${available.map(metric => `<label class="${metric.key === 'overfitGap' ? 'overfit-option' : ''}"><input type="checkbox" data-v8-metric-area="${area}" data-v8-metric-key="${metric.key}" ${selected.includes(metric.key) ? 'checked' : ''}><span>${metric.label}${metric.key === 'overfitGap' ? '<small>过拟合参考 · 默认不展示</small>' : ''}</span><i title="${esc(metric.short)}">ⓘ</i></label>`).join('')}<button class="metric-reset" data-action="restore-v8-metrics:${area}">恢复默认指标</button></div></details>`;
+}
+
+function metricAscendingV8(key) {
+  return ['rmse', 'mae', 'overfitGap'].includes(key);
+}
+
+function metricSortHeaderV8(area, metric, activeKey) {
+  const active = metric.key === activeKey;
+  const arrow = metricAscendingV8(metric.key) ? '↑' : '↓';
+  const direction = metricAscendingV8(metric.key) ? '从小到大' : '从大到小';
+  const sortHint = metric.key === 'overfitGap' ? `点击后按该差值${direction}排序` : `点击后按验证集${direction}排序`;
+  return `<th class="sortable-metric ${active ? 'active-sort' : ''}" title="${esc(metric.short)}；${sortHint}"><button data-action="sort-v8:${area}:${metric.key}">${metric.label} <span>${active ? arrow : ''}</span><i>ⓘ</i></button></th>`;
+}
+
+function compareTrainingToggleV8(area) {
+  const active = area === 'library' ? state.libraryCompareTraining : state.resultCompareTraining;
+  return `<button class="compare-training-toggle ${active ? 'active' : ''}" data-action="toggle-training-compare:${area}" aria-pressed="${active}"><i></i><span>对比训练集</span></button>`;
+}
+
+function overfitGapValueV8(result, task) {
+  if (task === 'regression') {
+    const train = resultValueV6(result, 'rmse', 'train');
+    const validation = resultValueV6(result, 'rmse', 'validation');
+    if (train === null || validation === null) return { value: null, relative: null, train, validation };
+    const value = +(validation - train).toFixed(3);
+    const relative = train === 0 ? null : +((value / train) * 100).toFixed(1);
+    return { value, relative, train, validation };
+  }
+  const train = resultValueV6(result, 'auc', 'train');
+  const validation = resultValueV6(result, 'auc', 'validation');
+  return { value: train === null || validation === null ? null : +(train - validation).toFixed(3), relative: null, train, validation };
+}
+
+function signedValueV8(value) {
+  if (value === null) return '—';
+  return `${value > 0 ? '+' : ''}${value}`;
+}
+
+function metricValueCellV8(item, result, metric, area) {
+  const task = state.projects.find(entry => entry.id === item.projectId)?.task || project()?.task || 'classification';
+  if (metric.key === 'overfitGap') {
+    const gap = overfitGapValueV8(result, task);
+    const detail = task === 'regression'
+      ? `${gap.relative === null ? '相对训练集 —' : `相对训练集 ${signedValueV8(gap.relative)}%`} · 训练 ${gap.train ?? '—'} / 验证 ${gap.validation ?? '—'}`
+      : `训练 ${gap.train ?? '—'} / 验证 ${gap.validation ?? '—'}`;
+    return `<td class="metric-value-cell overfit-gap-cell"><b>${signedValueV8(gap.value)}</b><small>${detail}</small></td>`;
+  }
+  const validation = area === 'library' ? libraryMetricValueV7(item, result, metric.key, 'validation') : resultValueV6(result, metric.key, 'validation');
+  const compare = area === 'library' ? state.libraryCompareTraining : state.resultCompareTraining;
+  const train = area === 'library' ? libraryMetricValueV7(item, result, metric.key, 'train') : resultValueV6(result, metric.key, 'train');
+  return `<td class="metric-value-cell"><b>${validation ?? '—'}</b>${compare ? `<small>训练集 ${train ?? '—'}</small>` : ''}</td>`;
+}
+
+function sortedExperimentResultsV8(item) {
+  if (state.tuningSort !== 'overfitGap') return sortedExperimentResults(item);
+  const task = state.projects.find(entry => entry.id === item.projectId)?.task || 'classification';
+  return [...item.results].sort((first, second) => {
+    const firstValue = overfitGapValueV8(first, task).value;
+    const secondValue = overfitGapValueV8(second, task).value;
+    if (firstValue === null && secondValue === null) return 0;
+    if (firstValue === null) return 1;
+    if (secondValue === null) return -1;
+    return firstValue - secondValue;
+  });
 }
 
 function metricGuideV8(task, className = '') {
-  return `<details class="metric-guide v8-metric-guide ${className}"><summary>查看所有指标说明</summary>${[...taskMetricsV8(task), gapMetricV8].map(metric => `<div><b>${metric.label}</b><span>${metric.full}</span><em>${metric.direction}</em></div>`).join('')}</details>`;
+  return `<details class="metric-guide v8-metric-guide ${className}"><summary>查看所有指标说明</summary>${[...taskMetricsV8(task), overfitMetricV8(task)].map(metric => `<div><b>${metric.label}</b><span>${metric.full}</span><em>${metric.direction}</em></div>`).join('')}</details>`;
 }
 
 const previousTrainingPanelV8 = trainingPanel;
@@ -90,19 +166,15 @@ function enhanceTrainingResultsV8() {
   if (state.page !== 'tuning' || !experiment()?.results?.length) return;
   const task = project().task;
   const selected = selectedMetricsV8('result', task);
-  if (![...selected, 'gap'].includes(state.tuningSort)) state.tuningSort = selected[0];
+  if (!selected.includes(state.tuningSort)) state.tuningSort = selected[0];
   const toolbar = app.querySelector('.tuning-toolbar');
-  const sort = toolbar?.querySelector('[data-tuning-sort]');
-  if (toolbar && sort && !toolbar.querySelector('.metric-picker')) sort.closest('label').insertAdjacentHTML('beforebegin', metricPickerV8('result', task));
-  if (sort) {
-    sort.innerHTML = [...selected, 'gap'].map(key => { const metric = metricByKeyV8(key, task); return `<option value="${key}" ${state.tuningSort === key ? 'selected' : ''}>${metric.label}</option>`; }).join('');
-  }
+  if (toolbar) toolbar.innerHTML = `${metricPickerV8('result', task)}${compareTrainingToggleV8('result')}<span class="validation-sort-note">默认展示并按验证集指标排序</span>`;
   const metrics = selected.map(key => metricByKeyV8(key, task));
   const item = experiment();
-  const results = state.showAllResults ? sortedExperimentResults(item) : sortedExperimentResults(item).slice(0, 3);
+  const results = state.showAllResults ? sortedExperimentResultsV8(item) : sortedExperimentResultsV8(item).slice(0, 3);
   const table = app.querySelector('.result-table');
   if (!table) return;
-  table.innerHTML = `<thead><tr><th>保存</th><th>排名</th><th>参数方案</th>${metrics.map(metric => `<th title="${esc(metric.short)}">训练 ${metric.label} ⓘ</th><th class="validation-column" title="${esc(metric.short)}">验证 ${metric.label} ⓘ</th>`).join('')}<th title="${esc(gapMetricV8.short)}">训练 / 验证差值 ⓘ</th><th class="sticky-action-column">操作</th></tr></thead><tbody>${results.map((result, index) => `<tr><td><input type="checkbox" data-save-result="${result.id}" ${(state.tuningSelections[item.id] || []).includes(result.id) ? 'checked' : ''}>${(state.savedResults[item.id] || []).includes(result.id) ? '<small>已保存</small>' : ''}</td><td><b>#${index + 1}</b></td><td>${esc(result.params)}</td>${metrics.map(metric => `<td>${resultValueV6(result, metric.key, 'train') ?? '—'}</td><td class="validation-column">${resultValueV6(result, metric.key, 'validation') ?? '—'}</td>`).join('')}<td>${resultValueV6(result, 'gap', state.resultScope)}</td><td class="sticky-action-column">${button('查看模型报告', `report-result:${result.id}`, 'primary')}</td></tr>`).join('')}</tbody>`;
+  table.innerHTML = `<thead><tr><th>保存</th><th>排名</th><th>参数方案</th>${metrics.map(metric => metricSortHeaderV8('result', metric, state.tuningSort)).join('')}<th class="sticky-action-column">操作</th></tr></thead><tbody>${results.map((result, index) => `<tr><td><input type="checkbox" data-save-result="${result.id}" ${(state.tuningSelections[item.id] || []).includes(result.id) ? 'checked' : ''}>${(state.savedResults[item.id] || []).includes(result.id) ? '<small>已保存</small>' : ''}</td><td><b>#${index + 1}</b></td><td>${schemeCellV8(item, result)}</td>${metrics.map(metric => metricValueCellV8(item, result, metric, 'result')).join('')}<td class="sticky-action-column">${button('查看模型报告', `report-result:${result.id}`, 'primary')}</td></tr>`).join('')}</tbody>`;
   const card = table.closest('.table-card');
   card?.classList.add('sticky-action-table');
   if (card && !card.nextElementSibling?.classList.contains('v8-result-guide')) card.insertAdjacentHTML('afterend', metricGuideV8(task, 'v8-result-guide'));
@@ -172,6 +244,71 @@ function enhanceReportV8() {
   if (footer) footer.insertAdjacentHTML('beforebegin', guide); else app.querySelector('.page')?.insertAdjacentHTML('beforeend', guide);
 }
 
+let pendingCorrelationV8 = null;
+
+function correlationQualityV8(column) {
+  const missingScore = (1 - (column.missing || 0)) * 100;
+  const taskScore = project().task === 'classification' ? (column.iv || 0) * 12 : 0;
+  const stabilityScore = (1 - (column.psi || 0)) * 6;
+  return missingScore + taskScore + stabilityScore;
+}
+
+function correlationReasonV8(retained, excluded) {
+  const reasons = [];
+  if ((retained.missing || 0) < (excluded.missing || 0)) reasons.push(`缺失率更低（${((retained.missing || 0) * 100).toFixed(1)}% 对 ${((excluded.missing || 0) * 100).toFixed(1)}%）`);
+  if (project().task === 'classification' && (retained.iv || 0) > (excluded.iv || 0)) reasons.push(`IV 更高（${(retained.iv || 0).toFixed(3)} 对 ${(excluded.iv || 0).toFixed(3)}）`);
+  if ((retained.psi || 0) < (excluded.psi || 0)) reasons.push(`PSI 更低（${(retained.psi || 0).toFixed(2)} 对 ${(excluded.psi || 0).toFixed(2)}）`);
+  return reasons.length ? reasons.join('，') : '综合缺失率、筛选表现和稳定性后更适合作为代表字段';
+}
+
+function correlationRecommendationV8() {
+  const { columns, pairs } = correlationValuesV6();
+  const candidates = columns.filter(column => column.trainable && column.included !== false).sort((first, second) => correlationQualityV8(second) - correlationQualityV8(first));
+  const threshold = state.featureThresholds.correlation;
+  const pairScore = (first, second) => pairs.find(pair => pair.first === first && pair.second === second || pair.first === second && pair.second === first)?.score || 0;
+  const retained = [];
+  const excluded = [];
+  candidates.forEach(column => {
+    const conflicts = retained.map(item => ({ item, score: pairScore(item, column) })).filter(entry => entry.score >= threshold).sort((first, second) => second.score - first.score);
+    if (!conflicts.length) return retained.push(column);
+    const keeper = conflicts[0];
+    excluded.push({ retained: keeper.item, excluded: column, score: keeper.score, reason: correlationReasonV8(keeper.item, column) });
+  });
+  const groups = retained.map(column => ({ retained: column, excluded: excluded.filter(entry => entry.retained === column) })).filter(group => group.excluded.length);
+  return { retained, excluded, groups, threshold };
+}
+
+function fieldTagsV8(columns, emptyText) {
+  return columns.length ? `<div class="field-tags">${columns.map(column => `<span>${esc(column.name)}</span>`).join('')}</div>` : `<span class="muted-text">${emptyText}</span>`;
+}
+
+function correlationPreviewModalV8() {
+  pendingCorrelationV8 = correlationRecommendationV8();
+  const recommendation = pendingCorrelationV8;
+  const detail = recommendation.groups.length ? `<details class="correlation-result-detail"><summary>查看详情</summary><div class="correlation-detail-table"><table><thead><tr><th>保留字段</th><th>排除字段</th><th>相关系数</th><th>推荐理由</th></tr></thead><tbody>${recommendation.groups.map(group => `<tr><td><b>${esc(group.retained.name)}</b></td><td>${fieldTagsV8(group.excluded.map(entry => entry.excluded), '')}</td><td>${group.excluded.map(entry => `<span><b>${esc(entry.excluded.name)}</b>：${entry.score.toFixed(2)}</span>`).join('')}</td><td>${group.excluded.map(entry => `<span><b>${esc(entry.excluded.name)}</b>：${esc(entry.reason)}</span>`).join('')}</td></tr>`).join('')}</tbody></table></div><p class="correlation-detail-note">同一保留字段只展示一次；每个排除字段只归入一个最终保留字段。</p></details>` : '';
+  modal(`<h2>自动处理高相关特征</h2><p>以下结果仅针对当前已纳入、参与相关性计算的数值字段；确认前不会修改特征开关。</p><div class="correlation-result-summary"><section><div><b>最终保留</b><span>${recommendation.retained.length} 个字段</span></div>${fieldTagsV8(recommendation.retained, '没有可保留字段')}</section><section class="excluded"><div><b>建议排除</b><span>${recommendation.excluded.length} 个字段</span></div>${fieldTagsV8(recommendation.excluded.map(entry => entry.excluded), '当前阈值下无需排除')}</section></div>${detail}<div class="modal-actions">${button('取消', 'close-modal')}${recommendation.excluded.length ? button('确认处理', 'confirm-correlation-v8', 'primary') : button('关闭', 'close-modal', 'primary')}</div>`);
+  const modalElement = document.querySelector('.modal-backdrop .modal');
+  modalElement?.classList.add('correlation-preview-modal');
+  modalElement?.querySelectorAll('[data-action]').forEach(control => control.onclick = event => { event.stopPropagation(); action(control.dataset.action); });
+}
+
+function applyCorrelationRecommendationV8() {
+  const recommendation = pendingCorrelationV8 || correlationRecommendationV8();
+  recommendation.excluded.forEach(entry => { entry.excluded.included = false; });
+  dataset().feature.revision += 1;
+  markDatasetStale(dataset());
+  pendingCorrelationV8 = null;
+  document.querySelector('.modal-backdrop')?.remove();
+  save();
+  render();
+  toast(`已保留 ${recommendation.retained.length} 个字段，排除 ${recommendation.excluded.length} 个高相关字段。`);
+}
+
+function enhanceCorrelationActionsV8() {
+  if (state.page !== 'feature') return;
+  app.querySelector('[data-action="confirm-correlation-threshold"]')?.classList.add('primary');
+}
+
 function schemeNumberV8(item, result) {
   const matched = String(result.params || '').match(/方案\s*(\d+)/);
   return matched ? Number(matched[1]) : Math.max(1, (item.results || []).findIndex(row => row.id === result.id) + 1);
@@ -192,19 +329,87 @@ function schemeCellV8(item, result) {
   return `<span class="scheme-label" tabindex="0"><b>${schemeLabelV8(item, result)}</b><span class="scheme-tooltip"><strong>模型参数</strong>${parameterDetailV8(result).map(part => `<span>${esc(part)}</span>`).join('')}</span></span>`;
 }
 
-function sortedProjectLibraryRowsV8(task) {
-  const rows = globalLibraryRowsV6();
+function allLibraryRowsV8() {
+  return Object.values(state.savedResultSnapshots).filter(snapshot => state.experiments[snapshot.experimentId] && state.projects.some(item => item.id === snapshot.projectId)).map(snapshot => ({ item: { ...state.experiments[snapshot.experimentId], id: snapshot.experimentId, projectId: snapshot.projectId, datasetId: snapshot.datasetId, name: snapshot.experimentName, type: snapshot.type }, result: snapshot.result }));
+}
+
+function libraryCreatedAtScoreV8(value) {
+  const parts = String(value || '').match(/\d+/g)?.map(Number) || [];
+  if (parts.length < 3) return 0;
+  return new Date(parts[0], parts[1] - 1, parts[2], parts[3] || 0, parts[4] || 0, parts[5] || 0).getTime();
+}
+
+function sortLibraryRowsByCreatedV8(rows) {
+  return [...rows].sort((first, second) => libraryCreatedAtScoreV8(savedResultCreatedAtV7(second.item, second.result)) - libraryCreatedAtScoreV8(savedResultCreatedAtV7(first.item, first.result)));
+}
+
+function libraryExperimentEntriesV8(rows) {
+  const grouped = new Map();
+  rows.forEach(row => {
+    if (!grouped.has(row.item.id)) grouped.set(row.item.id, { item: row.item, rows: [] });
+    grouped.get(row.item.id).rows.push(row);
+  });
+  return [...grouped.values()].map(entry => {
+    entry.rows = sortLibraryRowsByCreatedV8(entry.rows);
+    entry.createdAt = savedResultCreatedAtV7(entry.rows[0].item, entry.rows[0].result);
+    return entry;
+  });
+}
+
+function activeLibraryTaskV8() {
+  const detail = state.experiments[state.libraryDetailExperimentId];
+  const owner = detail ? state.projects.find(item => item.id === detail.projectId) : state.projects.find(item => item.id === state.libraryProjectId);
+  return owner?.task || 'classification';
+}
+
+function sortProjectLibraryRowsV8(rows) {
   const key = state.librarySort;
-  if (key === 'createdAt') return rows.sort((first, second) => savedResultCreatedAtV7(second.item, second.result).localeCompare(savedResultCreatedAtV7(first.item, first.result)));
-  const ascending = ['rmse', 'mae', 'gap'].includes(key);
-  return rows.sort((first, second) => {
-    const firstValue = libraryMetricValueV7(first.item, first.result, key, state.libraryMetricScope);
-    const secondValue = libraryMetricValueV7(second.item, second.result, key, state.libraryMetricScope);
+  return [...rows].sort((first, second) => {
+    const task = state.projects.find(entry => entry.id === first.item.projectId)?.task || 'classification';
+    const firstValue = key === 'overfitGap' ? overfitGapValueV8(first.result, task).value : libraryMetricValueV7(first.item, first.result, key, 'validation');
+    const secondValue = key === 'overfitGap' ? overfitGapValueV8(second.result, task).value : libraryMetricValueV7(second.item, second.result, key, 'validation');
     if (firstValue === null && secondValue === null) return 0;
     if (firstValue === null) return 1;
     if (secondValue === null) return -1;
-    return ascending ? firstValue - secondValue : secondValue - firstValue;
+    return metricAscendingV8(key) ? firstValue - secondValue : secondValue - firstValue;
   });
+}
+
+function modelLibraryIndexV8(allRows) {
+  const entries = libraryExperimentEntriesV8(allRows);
+  if (state.libraryProjectId !== 'all' && !state.projects.some(item => item.id === state.libraryProjectId)) state.libraryProjectId = 'all';
+  const projectEntries = entries.filter(entry => state.libraryProjectId === 'all' || entry.item.projectId === state.libraryProjectId);
+  const datasetIds = [...new Set(projectEntries.map(entry => entry.item.datasetId))];
+  if (state.libraryDatasetId !== 'all' && !datasetIds.includes(state.libraryDatasetId)) state.libraryDatasetId = 'all';
+  const datasetEntries = projectEntries.filter(entry => state.libraryDatasetId === 'all' || entry.item.datasetId === state.libraryDatasetId);
+  const types = [...new Set(datasetEntries.map(entry => entry.item.type))];
+  if (state.libraryModelType !== 'all' && !types.includes(state.libraryModelType)) state.libraryModelType = 'all';
+  const visible = datasetEntries.filter(entry => state.libraryModelType === 'all' || entry.item.type === state.libraryModelType).sort((first, second) => libraryCreatedAtScoreV8(second.createdAt) - libraryCreatedAtScoreV8(first.createdAt));
+  const projectOptions = state.projects.map(item => `<option value="${item.id}" ${item.id === state.libraryProjectId ? 'selected' : ''}>${esc(item.name)}</option>`).join('');
+  const datasetOptions = datasetIds.map(id => `<option value="${id}" ${id === state.libraryDatasetId ? 'selected' : ''}>${esc(state.datasets[id]?.name || '数据集已删除')}</option>`).join('');
+  const typeOptions = types.map(type => `<option value="${type}" ${type === state.libraryModelType ? 'selected' : ''}>${modelName(type)}</option>`).join('');
+  const filters = `<div class="library-toolbar library-index-filters"><label>项目<select data-v6-library-project><option value="all">全部项目</option>${projectOptions}</select></label><label>数据集<select data-v6-library-dataset><option value="all">全部数据集</option>${datasetOptions}</select></label><label>模型类型<select data-v6-library-type><option value="all">全部模型</option>${typeOptions}</select></label><span class="library-sort-fixed">按创建时间从新到旧</span></div>`;
+  if (!allRows.length) return emptyLibraryV8(false);
+  const table = visible.length ? `<div class="table-card library-table-wrap library-index-table"><table><thead><tr><th>项目</th><th>数据集</th><th>模型实验</th><th>模型类型</th><th>已保存方案</th><th>创建时间</th></tr></thead><tbody>${visible.map(entry => { const owner = state.projects.find(item => item.id === entry.item.projectId); const set = state.datasets[entry.item.datasetId]; return `<tr class="library-index-row" data-library-open-experiment="${entry.item.id}" tabindex="0" role="button" aria-label="比较 ${esc(set?.name || '当前数据集')} 下的模型"><td>${esc(owner?.name || '项目已删除')}</td><td>${esc(set?.name || '数据集已删除')}</td><td><b>${esc(entry.item.name)}</b><small>点击比较同数据集模型</small></td><td>${modelName(entry.item.type)}</td><td><span class="library-scheme-count">${entry.rows.length} 个方案</span></td><td class="library-created">${entry.createdAt}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty-state"><h2>当前筛选范围暂无模型</h2><p>调整项目、数据集或模型类型筛选后重试。</p></div>';
+  return `${filters}${table}`;
+}
+
+function modelLibraryDetailV8(rows, sourceItem) {
+  const item = sourceItem || rows[0]?.item;
+  if (!item) return '';
+  const owner = state.projects.find(entry => entry.id === item.projectId);
+  const set = state.datasets[item.datasetId];
+  const task = owner?.task || 'classification';
+  const selected = selectedMetricsV8('library', task);
+  if (!selected.includes(state.librarySort)) state.librarySort = selected[0];
+  const sortedRows = sortProjectLibraryRowsV8(rows);
+  const metrics = selected.map(key => metricByKeyV8(key, task));
+  const tools = `<div class="library-compact-tools">${metricPickerV8('library', task)}${compareTrainingToggleV8('library')}<span class="validation-sort-note">默认展示验证集；点击指标表头排序</span></div>`;
+  const experimentCount = new Set(rows.map(row => row.item.id)).size;
+  const modelCount = new Set(rows.map(row => row.item.type)).size;
+  const context = `<div class="library-detail-context"><span><b>项目</b>${esc(owner?.name || '项目已删除')}</span><span><b>数据集</b>${esc(set?.name || '数据集已删除')}</span><span><b>模型实验</b>${experimentCount} 个</span><span><b>模型类型</b>${modelCount} 种</span><span><b>已保存方案</b>${rows.length} 个</span></div>`;
+  const table = `<div class="table-card library-table-wrap sticky-action-table library-detail-table"><table><thead><tr><th>模型实验</th><th>模型类型</th><th>参数方案</th>${metrics.map(metric => metricSortHeaderV8('library', metric, state.librarySort)).join('')}<th>创建时间</th><th class="sticky-action-column">操作</th></tr></thead><tbody>${sortedRows.map(({ item: rowItem, result }) => `<tr><td><b>${esc(rowItem.name)}</b></td><td>${modelName(rowItem.type)}</td><td>${schemeCellV8(rowItem, result)}</td>${metrics.map(metric => metricValueCellV8(rowItem, result, metric, 'library')).join('')}<td class="library-created">${savedResultCreatedAtV7(rowItem, result)}</td><td class="sticky-action-column"><div class="row-actions">${button('查看训练结果', `library-result:${rowItem.id}:${result.id}`)}${button('查看模型报告', `library-report-v7:${rowItem.id}:${result.id}`, 'primary')}${button('生成 API 配置', `open-api-config:${rowItem.id}:${result.id}`)}</div></td></tr>`).join('')}</tbody></table></div>`;
+  return `${context}${tools}${table}${metricGuideV8(task, 'v8-library-guide')}`;
 }
 
 function libraryServicesV8() {
@@ -218,33 +423,69 @@ function emptyLibraryV8(projectScope) {
 }
 
 modelsPage = function () {
-  const projectScope = state.libraryProjectId !== 'all';
-  const selectedProject = projectScope ? state.projects.find(item => item.id === state.libraryProjectId) : null;
-  const projectIds = projectScope ? [state.libraryProjectId] : state.projects.map(item => item.id);
-  const datasets = projectIds.flatMap(projectId => state.projects.find(item => item.id === projectId)?.datasets || []).map(id => state.datasets[id]).filter(Boolean);
-  const types = [...new Set(Object.values(state.experiments).filter(item => projectIds.includes(item.projectId) && (state.libraryDatasetId === 'all' || item.datasetId === state.libraryDatasetId)).map(item => item.type))];
-  let rows = globalLibraryRowsV6();
-  let compare = '';
-  const baseFilters = `<label>项目<select data-v6-library-project><option value="all">全部项目</option>${state.projects.map(item => `<option value="${item.id}" ${item.id === state.libraryProjectId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label><label>数据集<select data-v6-library-dataset><option value="all">全部数据集</option>${datasets.map(item => `<option value="${item.id}" ${item.id === state.libraryDatasetId ? 'selected' : ''}>${esc(item.name)}</option>`).join('')}</select></label><label>模型类型<select data-v6-library-type><option value="all">全部模型</option>${types.map(type => `<option value="${type}" ${type === state.libraryModelType ? 'selected' : ''}>${modelName(type)}</option>`).join('')}</select></label>`;
-  if (!projectScope) {
-    rows = rows.sort((first, second) => savedResultCreatedAtV7(second.item, second.result).localeCompare(savedResultCreatedAtV7(first.item, first.result)));
-    compare = `<div class="library-toolbar">${baseFilters}<span class="library-scope-note">跨项目视图按创建时间展示，进入项目后查看指标。</span></div>${rows.length ? `<div class="table-card library-table-wrap sticky-action-table"><table><thead><tr><th>项目</th><th>任务类型</th><th>数据集</th><th>模型实验</th><th>模型类型</th><th>参数方案</th><th>创建时间</th><th class="sticky-action-column">操作</th></tr></thead><tbody>${rows.map(({ item, result }) => { const owner = state.projects.find(projectItem => projectItem.id === item.projectId); const set = state.datasets[item.datasetId]; return `<tr><td><button class="text-link" data-action="library-project-v8:${owner.id}">${esc(owner.name)}</button></td><td><span class="task-badge ${owner.task}">${taskLabel(owner.task)}</span></td><td>${esc(set?.name || '数据集已删除')}</td><td><b>${esc(item.name)}</b></td><td>${modelName(item.type)}</td><td>${schemeCellV8(item, result)}</td><td class="library-created">${savedResultCreatedAtV7(item, result)}</td><td class="sticky-action-column"><div class="row-actions">${button('查看训练结果', `library-result:${item.id}:${result.id}`)}${button('查看模型报告', `library-report-v7:${item.id}:${result.id}`, 'primary')}${button('生成 API 配置', `open-api-config:${item.id}:${result.id}`)}</div></td></tr>`; }).join('')}</tbody></table></div>` : emptyLibraryV8(false)}`;
-  } else {
-    const task = selectedProject?.task || 'classification';
-    const selected = selectedMetricsV8('library', task);
-    if (![...selected, 'gap'].includes(state.librarySort)) state.librarySort = selected[0];
-    rows = sortedProjectLibraryRowsV8(task);
-    const metrics = selected.map(key => metricByKeyV8(key, task));
-    const sortOptions = [...metrics, gapMetricV8];
-    compare = `<div class="library-toolbar">${baseFilters}<label>数据范围<select data-v8-library-scope><option value="validation" ${state.libraryMetricScope === 'validation' ? 'selected' : ''}>验证集</option><option value="train" ${state.libraryMetricScope === 'train' ? 'selected' : ''}>训练集</option></select></label>${metricPickerV8('library', task)}<label>排序指标<select data-v8-library-sort>${sortOptions.map(metric => `<option value="${metric.key}" ${state.librarySort === metric.key ? 'selected' : ''}>${metric.label}</option>`).join('')}</select></label></div><div class="library-range-label">当前指标范围：${state.libraryMetricScope === 'validation' ? '验证集' : '训练集'}</div>${rows.length ? `<div class="table-card library-table-wrap sticky-action-table"><table><thead><tr><th>项目</th><th>数据集</th><th>模型实验</th><th>模型类型</th><th>参数方案</th>${metrics.map(metric => `<th title="${esc(metric.short)}">${metric.label} ⓘ</th>`).join('')}<th title="${esc(gapMetricV8.short)}">训练 / 验证差值 ⓘ</th><th>创建时间</th><th class="sticky-action-column">操作</th></tr></thead><tbody>${rows.map(({ item, result }) => { const owner = state.projects.find(projectItem => projectItem.id === item.projectId); const set = state.datasets[item.datasetId]; return `<tr><td>${esc(owner.name)}</td><td>${esc(set?.name || '数据集已删除')}</td><td><b>${esc(item.name)}</b></td><td>${modelName(item.type)}</td><td>${schemeCellV8(item, result)}</td>${metrics.map(metric => `<td>${libraryMetricValueV7(item, result, metric.key, state.libraryMetricScope) ?? '—'}</td>`).join('')}<td>${libraryMetricValueV7(item, result, 'gap', state.libraryMetricScope) ?? '—'}</td><td class="library-created">${savedResultCreatedAtV7(item, result)}</td><td class="sticky-action-column"><div class="row-actions">${button('查看训练结果', `library-result:${item.id}:${result.id}`)}${button('查看模型报告', `library-report-v7:${item.id}:${result.id}`, 'primary')}${button('生成 API 配置', `open-api-config:${item.id}:${result.id}`)}</div></td></tr>`; }).join('')}</tbody></table></div>${metricGuideV8(task, 'v8-library-guide')}` : emptyLibraryV8(true)}`;
-  }
-  return shell(`${pageHead('模型库', projectScope ? `查看 ${esc(selectedProject?.name || '')} 下的模型指标。` : '跨项目查找和管理已保存模型；进入项目后比较指标。')}<div class="library-tabs"><button data-action="library-tab:compare" class="${state.libraryTab === 'compare' ? 'active' : ''}">模型比较</button><button data-action="library-tab:api" class="${state.libraryTab === 'api' ? 'active' : ''}">API 服务</button></div>${state.libraryTab === 'api' ? libraryServicesV8() : compare}`);
+  const allRows = allLibraryRowsV8();
+  const detailItem = state.experiments[state.libraryDetailExperimentId] || null;
+  const detailRows = detailItem ? allRows.filter(row => row.item.projectId === detailItem.projectId && row.item.datasetId === detailItem.datasetId) : [];
+  if (state.libraryDetailExperimentId && !detailRows.length) state.libraryDetailExperimentId = null;
+  const headAction = detailItem ? button('返回模型列表', 'close-library-detail-v8') : '';
+  const detailSet = detailItem ? state.datasets[detailItem.datasetId] : null;
+  const subtitle = detailItem ? `${esc(detailSet?.name || '当前数据集')} · 比较同项目、同数据集下不同模型的已保存方案。` : '筛选并打开模型实验；模型按创建时间从新到旧排列。';
+  const compare = detailItem ? modelLibraryDetailV8(detailRows, detailItem) : modelLibraryIndexV8(allRows);
+  return shell(`${pageHead('模型库', subtitle, headAction)}<div class="library-tabs"><button data-action="library-tab:compare" class="${state.libraryTab === 'compare' ? 'active' : ''}">模型比较</button><button data-action="library-tab:api" class="${state.libraryTab === 'api' ? 'active' : ''}">API 服务</button></div>${state.libraryTab === 'api' ? libraryServicesV8() : compare}`);
 };
 
 const previousActionV8 = action;
 action = function (name) {
-  if (name.startsWith('library-project-v8:')) { state.libraryProjectId = name.split(':')[1]; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.libraryMetricScope = 'validation'; save(); return render(); }
+  if (name.startsWith('open-library-experiment-v8:')) {
+    state.libraryDetailExperimentId = name.split(':')[1];
+    const task = activeLibraryTaskV8();
+    state.librarySort = task === 'regression' ? 'rmse' : 'auc';
+    state.metricPickerOpenV8 = null;
+    save(); return render();
+  }
+  if (name === 'close-library-detail-v8') { state.libraryDetailExperimentId = null; state.librarySort = 'createdAt'; state.metricPickerOpenV8 = null; save(); return render(); }
+  if (name.startsWith('library-project-v8:')) { state.libraryDetailExperimentId = null; state.libraryProjectId = name.split(':')[1]; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); return render(); }
+  if (name === 'library-all-v8') { state.libraryDetailExperimentId = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); return render(); }
+  if (name.startsWith('library-filter-v8:')) {
+    const [, kind, value] = name.split(':');
+    if (kind === 'dataset') { state.libraryDatasetId = value; state.libraryModelType = 'all'; }
+    if (kind === 'model') state.libraryModelType = value;
+    save(); return render();
+  }
+  if (name.startsWith('sort-v8:')) {
+    const [, area, key] = name.split(':');
+    if (area === 'result') {
+      state.tuningSort = key;
+      const item = experiment();
+      if (!state.tuningSelectionTouched[item.id]) state.tuningSelections[item.id] = [sortedExperimentResultsV8(item)[0].id];
+    } else state.librarySort = key;
+    save(); return render();
+  }
+  if (name.startsWith('toggle-training-compare:')) {
+    const area = name.split(':')[1];
+    if (area === 'library') state.libraryCompareTraining = !state.libraryCompareTraining;
+    else state.resultCompareTraining = !state.resultCompareTraining;
+    save(); return render();
+  }
+  if (name.startsWith('restore-v8-metrics:')) {
+    const area = name.split(':')[1];
+    const task = area === 'library' ? activeLibraryTaskV8() : project().task;
+    const defaults = task === 'regression' ? ['rmse', 'r2'] : ['auc', 'f1'];
+    const store = area === 'library' ? state.libraryVisibleMetrics : state.resultVisibleMetrics;
+    store[task] = defaults;
+    if (area === 'library') state.librarySort = defaults[0];
+    else {
+      state.tuningSort = defaults[0];
+      const item = experiment();
+      if (!state.tuningSelectionTouched[item.id]) state.tuningSelections[item.id] = [sortedExperimentResultsV8(item)[0].id];
+    }
+    state.metricPickerOpenV8 = area;
+    save(); return render();
+  }
+  if (name === 'preview-correlation') return correlationPreviewModalV8();
+  if (name === 'confirm-correlation-v8') return applyCorrelationRecommendationV8();
   if (name === 'go-projects-v8') return go('projects');
+  if (name === 'project-models' || name === 'dataset-models-v7' || name === 'save-library-results') { state.libraryDetailExperimentId = null; state.librarySort = 'createdAt'; }
   if (name.startsWith('delete-entity:project:')) {
     const result = previousActionV8(name);
     if (!state.projects.length) { state.page = 'projects'; save(); return render(); }
@@ -296,23 +537,44 @@ bind = function () {
   enhanceTrainingResultsV8();
   enhanceDatasetHoverV8();
   enhanceReportV8();
+  enhanceCorrelationActionsV8();
   app.querySelectorAll('[data-action]').forEach(element => element.onclick = event => { event.stopPropagation(); action(element.dataset.action); });
   app.querySelectorAll('.project-card-menu').forEach(menu => menu.onclick = event => event.stopPropagation());
   app.querySelectorAll('[data-save-result]').forEach(checkbox => checkbox.onchange = () => { const item = experiment(); const selected = new Set(state.tuningSelections[item.id] || []); checkbox.checked ? selected.add(+checkbox.dataset.saveResult) : selected.delete(+checkbox.dataset.saveResult); state.tuningSelections[item.id] = [...selected]; state.tuningSelectionTouched[item.id] = true; save(); enhanceSaveButton(); });
   app.querySelectorAll('[data-v8-metric-area]').forEach(checkbox => checkbox.onchange = () => {
     const area = checkbox.dataset.v8MetricArea;
-    const task = area === 'library' ? state.projects.find(item => item.id === state.libraryProjectId)?.task : project().task;
+    const task = area === 'library' ? activeLibraryTaskV8() : project().task;
     const selected = new Set(selectedMetricsV8(area, task));
     checkbox.checked ? selected.add(checkbox.dataset.v8MetricKey) : selected.delete(checkbox.dataset.v8MetricKey);
     if (!selected.size) { checkbox.checked = true; return toast('请至少保留一个显示指标。'); }
     const store = area === 'library' ? state.libraryVisibleMetrics : state.resultVisibleMetrics;
     store[task] = [...selected];
-    if (area === 'library' && ![...selected, 'gap'].includes(state.librarySort)) state.librarySort = [...selected][0];
-    if (area === 'result' && ![...selected, 'gap'].includes(state.tuningSort)) state.tuningSort = [...selected][0];
+    if (area === 'library' && !selected.has(state.librarySort)) state.librarySort = [...selected][0];
+    if (area === 'result' && !selected.has(state.tuningSort)) {
+      state.tuningSort = [...selected][0];
+      const item = experiment();
+      if (!state.tuningSelectionTouched[item.id]) state.tuningSelections[item.id] = [sortedExperimentResultsV8(item)[0].id];
+    }
+    state.metricPickerOpenV8 = area;
     save(); render();
   });
-  document.querySelector('[data-v8-library-scope]')?.addEventListener('change', event => { state.libraryMetricScope = event.target.value; save(); render(); });
-  document.querySelector('[data-v8-library-sort]')?.addEventListener('change', event => { state.librarySort = event.target.value; save(); render(); });
+  app.querySelectorAll('[data-v8-picker-area]').forEach(picker => {
+    if (state.metricPickerOpenV8 === picker.dataset.v8PickerArea) picker.open = true;
+    picker.ontoggle = () => { if (!picker.open && state.metricPickerOpenV8 === picker.dataset.v8PickerArea) { state.metricPickerOpenV8 = null; save(); } };
+  });
+  app.querySelectorAll('[data-library-open-experiment]').forEach(row => {
+    const open = () => action(`open-library-experiment-v8:${row.dataset.libraryOpenExperiment}`);
+    row.onclick = open;
+    row.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
+  });
+  const projectFilter = document.querySelector('[data-v6-library-project]');
+  if (projectFilter) { const clean = projectFilter.cloneNode(true); projectFilter.replaceWith(clean); clean.onchange = event => { state.libraryProjectId = event.target.value; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); render(); }; }
+  const datasetFilter = document.querySelector('[data-v6-library-dataset]');
+  if (datasetFilter) { const clean = datasetFilter.cloneNode(true); datasetFilter.replaceWith(clean); clean.onchange = event => { state.libraryDatasetId = event.target.value; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); render(); }; }
+  const modelFilter = document.querySelector('[data-v6-library-type]');
+  if (modelFilter) { const clean = modelFilter.cloneNode(true); modelFilter.replaceWith(clean); clean.onchange = event => { state.libraryModelType = event.target.value; state.librarySort = 'createdAt'; save(); render(); }; }
+  const globalModels = app.querySelector('.main-nav [data-page="models"]');
+  if (globalModels) globalModels.onclick = () => { state.libraryDetailExperimentId = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; state.libraryTab = 'compare'; save(); go('models'); };
   app.querySelectorAll('[data-v8-hover-preview]').forEach(control => control.onclick = event => { event.stopPropagation(); const [id, delta] = control.dataset.v8HoverPreview.split(':'); state.hoverPreviewPage ||= {}; state.hoverPreviewPage[id] = Math.max(0, (state.hoverPreviewPage[id] || 0) + Number(delta)); state.hoverTab ||= {}; state.hoverTab[id] = 'preview'; save(); render(); });
 };
 
