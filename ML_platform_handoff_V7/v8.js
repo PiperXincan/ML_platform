@@ -9,6 +9,57 @@ const legacyLibraryExperimentIdV8 = typeof state.libraryDetailExperimentId === '
 state.libraryDetailScope = state.libraryDetailScope && ['project', 'dataset', 'experiment'].includes(state.libraryDetailScope.type) && typeof state.libraryDetailScope.id === 'string' ? state.libraryDetailScope : legacyLibraryExperimentIdV8 ? { type: 'experiment', id: legacyLibraryExperimentIdV8 } : null;
 state.libraryDetailExperimentId = null;
 
+exampleColumns.loan ||= [
+  { name: '申请编号', type: 'text', missing: 0, unique: 5000, trainable: false, reason: '疑似 ID，唯一值接近样本数', iv: .001, psi: .02, included: false },
+  { name: '年龄', type: 'number', missing: 0, unique: 58, trainable: true, iv: .08, psi: .04, included: true },
+  { name: '年收入', type: 'number', missing: .02, unique: 3180, trainable: true, iv: .21, psi: .09, included: true },
+  { name: '贷款金额', type: 'number', missing: 0, unique: 2270, trainable: true, iv: .28, psi: .12, included: true },
+  { name: '信用评分', type: 'number', missing: .01, unique: 420, trainable: true, iv: .36, psi: .07, included: true },
+  { name: '就业类型', type: 'category', missing: .03, unique: 5, trainable: true, iv: .13, psi: .05, included: true },
+  { name: '申请日期', type: 'date', missing: 0, unique: 1095, trainable: false, reason: '原始日期字段', iv: 0, psi: .03, included: false },
+  { name: '是否违约', type: 'category', missing: 0, unique: 2, trainable: true, target: true, included: false }
+];
+previews.loan ||= [
+  ['L-0001', 31, 128000, 80000, 742, '正式员工', '2026-01-08', '否'],
+  ['L-0002', 46, 92000, 150000, 615, '个体经营', '2026-01-09', '是'],
+  ['L-0003', 27, 156000, 60000, 781, '正式员工', '2026-01-10', '否'],
+  ['L-0004', 39, 108000, 120000, 658, '合同员工', '2026-01-11', '是']
+];
+exampleColumns.car ||= [
+  { name: '车辆编号', type: 'text', missing: 0, unique: 4200, trainable: false, reason: '疑似 ID，唯一值接近样本数', psi: .02, included: false },
+  { name: '品牌', type: 'category', missing: 0, unique: 24, trainable: true, psi: .06, included: true },
+  { name: '车龄', type: 'number', missing: 0, unique: 18, trainable: true, variance: .046, targetCorrelation: -.61, psi: .05, included: true },
+  { name: '行驶里程', type: 'number', missing: .02, unique: 3460, trainable: true, variance: .083, targetCorrelation: -.68, psi: .11, included: true },
+  { name: '排量', type: 'number', missing: .01, unique: 16, trainable: true, variance: .031, targetCorrelation: .32, psi: .07, included: true },
+  { name: '变速箱', type: 'category', missing: 0, unique: 3, trainable: true, psi: .04, included: true },
+  { name: '上牌日期', type: 'date', missing: 0, unique: 1820, trainable: false, reason: '原始日期字段', psi: .03, included: false },
+  { name: '车辆价格', type: 'number', missing: 0, unique: 3650, trainable: true, target: true, included: false }
+];
+previews.car ||= [
+  ['V-0001', '品牌 A', 3, 42000, 2.0, '自动', '2023-04-12', 168000],
+  ['V-0002', '品牌 B', 7, 96000, 1.6, '自动', '2019-08-26', 82000],
+  ['V-0003', '品牌 C', 2, 25000, 2.5, '手自一体', '2024-02-18', 236000],
+  ['V-0004', '品牌 A', 10, 138000, 1.5, '手动', '2016-11-03', 46000]
+];
+
+const exampleDatasetSpecsV85 = {
+  churn: { name: '客户流失示例', rows: 7043, target: '是否流失', positive: '是' },
+  loan: { name: '贷款违约示例', rows: 5000, target: '是否违约', positive: '是' },
+  housing: { name: '住宅价格示例', rows: 1460, target: '房价', positive: '' },
+  car: { name: '二手车价格示例', rows: 4200, target: '车辆价格', positive: '' }
+};
+
+datasetSourceModal = function () {
+  const regression = project().task === 'regression';
+  const examples = regression
+    ? [['housing', '住宅价格预测', '1,460 行 · 目标：房价'], ['car', '二手车价格预测', '4,200 行 · 目标：车辆价格']]
+    : [['churn', '客户流失预测', '7,043 行 · 目标：是否流失'], ['loan', '贷款违约预测', '5,000 行 · 目标：是否违约']];
+  modal(`<h2>添加数据集</h2><p>上传自己的 CSV，或选择符合当前${taskLabel(project().task)}项目的示例。</p><div class="source-tabs"><button class="active" data-source-tab="upload">上传 CSV</button><button data-source-tab="example">示例数据集</button></div><div class="source-panel active" data-source-panel="upload"><div class="upload-box">${button('选择 CSV 文件', 'choose-csv', 'primary')}<span>支持 UTF-8、带表头的 CSV</span></div></div><div class="source-panel" data-source-panel="example"><div class="example-dataset-grid">${examples.map(([kind, label, meta]) => `<button class="example-dataset-card" data-action="use-example:${kind}"><b>${label}</b><span>${meta}</span></button>`).join('')}</div></div><div class="modal-actions">${button('取消', 'close-modal')}</div>`);
+  const modalElement = document.querySelector('.modal-backdrop');
+  modalElement.querySelectorAll('[data-action]').forEach(element => { if (element.dataset.action !== 'close-modal') element.onclick = event => { event.stopPropagation(); action(element.dataset.action); }; });
+  modalElement.querySelectorAll('[data-source-tab]').forEach(element => element.onclick = () => { modalElement.querySelectorAll('[data-source-tab]').forEach(tab => tab.classList.toggle('active', tab === element)); modalElement.querySelectorAll('[data-source-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.sourcePanel === element.dataset.sourceTab)); });
+};
+
 const previousShellV8 = shell;
 shell = function (content) {
   const projectPages = new Set(['project', 'dataset', 'feature', 'experiments', 'model-select', 'experiment', 'tuning', 'report']);
@@ -469,6 +520,50 @@ modelsPage = function () {
 
 const previousActionV8 = action;
 action = function (name) {
+  if (name.startsWith('use-example:')) {
+    const kind = name.split(':')[1];
+    const spec = exampleDatasetSpecsV85[kind];
+    if (!spec || !exampleColumns[kind] || !previews[kind]) return toast('示例数据不存在。');
+    document.querySelector('.modal-backdrop')?.remove();
+    const id = uid('d');
+    state.datasets[id] = { id, projectId: project().id, name: spec.name, uploadedAt: now(), rows: spec.rows, target: spec.target, positive: spec.positive, columns: structuredClone(exampleColumns[kind]), preview: structuredClone(previews[kind]), feature: { missing: 'median', split: '80-20', revision: 1 }, experiments: [] };
+    project().datasets.push(id);
+    project().updatedAt = now();
+    state.datasetId = id;
+    save(); go('project'); return toast('数据集已创建。');
+  }
+  if (name.startsWith('rename-entity:')) {
+    const [, type, id] = name.split(':');
+    const item = type === 'project' ? state.projects.find(entry => entry.id === id) : state.datasets[id];
+    if (!item) return toast('未找到需要重命名的内容。');
+    const label = type === 'project' ? '项目' : '数据集';
+    modal(`<h2>重命名${label}</h2><p>请输入新的${label}名称。</p><label class="field"><span>${label}名称</span><input id="rename-entity-name" value="${esc(item.name)}" maxlength="80"></label><div class="modal-actions">${button('取消', 'close-modal')}${button('确认修改', `confirm-rename-entity:${type}:${id}`, 'primary')}</div>`);
+    const confirm = document.querySelector('[data-action^="confirm-rename-entity:"]');
+    confirm.onclick = event => { event.stopPropagation(); action(confirm.dataset.action); };
+    const input = document.querySelector('#rename-entity-name');
+    input.focus(); input.select();
+    input.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); action(confirm.dataset.action); } };
+    return;
+  }
+  if (name.startsWith('confirm-rename-entity:')) {
+    const [, type, id] = name.split(':');
+    const input = document.querySelector('#rename-entity-name');
+    const value = input?.value.trim() || '';
+    const label = type === 'project' ? '项目' : '数据集';
+    if (!value) return toast(`请输入${label}名称。`);
+    const item = type === 'project' ? state.projects.find(entry => entry.id === id) : state.datasets[id];
+    if (!item) return toast(`未找到${label}。`);
+    const normalized = value.toLocaleLowerCase();
+    const duplicate = type === 'project'
+      ? state.projects.some(entry => entry.id !== id && entry.name.trim().toLocaleLowerCase() === normalized)
+      : state.projects.find(entry => entry.id === item.projectId)?.datasets.some(datasetId => datasetId !== id && state.datasets[datasetId]?.name.trim().toLocaleLowerCase() === normalized);
+    if (duplicate) return toast(`同一范围内已存在同名${label}。`);
+    item.name = value;
+    const owner = type === 'project' ? item : state.projects.find(entry => entry.id === item.projectId);
+    if (owner) owner.updatedAt = now();
+    document.querySelector('.modal-backdrop')?.remove();
+    save(); render(); return toast(`${label}已重命名。`);
+  }
   if (name.startsWith('open-library-scope-v8:')) {
     const [, type, id] = name.split(':');
     state.libraryDetailScope = { type, id };
@@ -549,6 +644,15 @@ function enhanceEmptyStatesV8() {
   }
 }
 
+function enhanceWorkspaceSummaryV85() {
+  if (state.page !== 'home') return;
+  const side = app.querySelector('.hero-side');
+  if (!side || side.querySelector('[data-workspace-datasets]')) return;
+  const count = state.projects.reduce((total, item) => total + item.datasets.filter(id => state.datasets[id]).length, 0);
+  const experiments = side.querySelectorAll(':scope > strong')[1];
+  experiments?.insertAdjacentHTML('beforebegin', `<strong data-workspace-datasets>${count}</strong><span>个数据集</span>`);
+}
+
 function enhanceProjectCardMenusV8() {
   if (state.page !== 'projects') return;
   app.querySelectorAll('[data-open-project]').forEach(card => {
@@ -559,8 +663,22 @@ function enhanceProjectCardMenusV8() {
     const group = document.createElement('div');
     group.className = 'project-card-tools';
     if (date) group.append(date);
-    group.insertAdjacentHTML('beforeend', `<details class="project-card-menu"><summary aria-label="项目操作" title="项目操作">···</summary><div class="project-card-menu-panel">${button('删除项目', `confirm-delete:project:${projectId}`)}</div></details>`);
+    group.insertAdjacentHTML('beforeend', `<details class="project-card-menu"><summary aria-label="项目操作" title="项目操作">···</summary><div class="project-card-menu-panel">${button('重命名项目', `rename-entity:project:${projectId}`)}${button('删除项目', `confirm-delete:project:${projectId}`)}</div></details>`);
     top.append(group);
+  });
+}
+
+function enhanceRenameControlsV85() {
+  const actions = app.querySelector('.page-head .head-actions');
+  if (actions && state.page === 'project' && !actions.querySelector('[data-action^="rename-entity:project:"]')) actions.insertAdjacentHTML('afterbegin', button('重命名项目', `rename-entity:project:${project().id}`));
+  if (actions && state.page === 'dataset' && !actions.querySelector('[data-action^="rename-entity:dataset:"]')) actions.insertAdjacentHTML('afterbegin', button('重命名数据集', `rename-entity:dataset:${dataset().id}`));
+  if (state.page !== 'project') return;
+  app.querySelectorAll('.dataset-hover-host').forEach(card => {
+    const entry = card.querySelector('[data-action^="enter-dataset:"]');
+    const rowActions = card.querySelector('.dataset-entry-actions');
+    const datasetId = entry?.dataset.action.split(':')[1];
+    if (!datasetId || !rowActions || rowActions.querySelector('.entity-card-menu')) return;
+    rowActions.insertAdjacentHTML('beforeend', `<details class="project-card-menu entity-card-menu"><summary aria-label="数据集操作" title="数据集操作">···</summary><div class="project-card-menu-panel">${button('重命名数据集', `rename-entity:dataset:${datasetId}`)}</div></details>`);
   });
 }
 
@@ -568,14 +686,16 @@ const previousBindV8 = bind;
 bind = function () {
   previousBindV8();
   enhanceEmptyStatesV8();
+  enhanceWorkspaceSummaryV85();
   enhanceProjectCardMenusV8();
+  enhanceRenameControlsV85();
   enhancePreprocessingV8();
   enhanceTrainingResultsV8();
   enhanceDatasetHoverV8();
   enhanceReportV8();
   enhanceCorrelationActionsV8();
   app.querySelectorAll('[data-action]').forEach(element => element.onclick = event => { event.stopPropagation(); action(element.dataset.action); });
-  app.querySelectorAll('.project-card-menu').forEach(menu => menu.onclick = event => event.stopPropagation());
+  app.querySelectorAll('.project-card-menu,.entity-card-menu').forEach(menu => menu.onclick = event => event.stopPropagation());
   app.querySelectorAll('[data-save-result]').forEach(checkbox => checkbox.onchange = () => { const item = experiment(); const selected = new Set(state.tuningSelections[item.id] || []); checkbox.checked ? selected.add(+checkbox.dataset.saveResult) : selected.delete(+checkbox.dataset.saveResult); state.tuningSelections[item.id] = [...selected]; state.tuningSelectionTouched[item.id] = true; save(); enhanceSaveButton(); });
   app.querySelectorAll('[data-v8-metric-area]').forEach(checkbox => checkbox.onchange = () => {
     const area = checkbox.dataset.v8MetricArea;
