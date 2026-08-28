@@ -5,7 +5,9 @@ state.libraryMetricScope = 'validation';
 state.resultCompareTraining = Boolean(state.resultCompareTraining);
 state.libraryCompareTraining = Boolean(state.libraryCompareTraining);
 state.metricPickerOpenV8 = null;
-state.libraryDetailExperimentId = typeof state.libraryDetailExperimentId === 'string' ? state.libraryDetailExperimentId : null;
+const legacyLibraryExperimentIdV8 = typeof state.libraryDetailExperimentId === 'string' ? state.libraryDetailExperimentId : null;
+state.libraryDetailScope = state.libraryDetailScope && ['project', 'dataset', 'experiment'].includes(state.libraryDetailScope.type) && typeof state.libraryDetailScope.id === 'string' ? state.libraryDetailScope : legacyLibraryExperimentIdV8 ? { type: 'experiment', id: legacyLibraryExperimentIdV8 } : null;
+state.libraryDetailExperimentId = null;
 
 const previousShellV8 = shell;
 shell = function (content) {
@@ -357,9 +359,36 @@ function libraryExperimentEntriesV8(rows) {
 }
 
 function activeLibraryTaskV8() {
-  const detail = state.experiments[state.libraryDetailExperimentId];
-  const owner = detail ? state.projects.find(item => item.id === detail.projectId) : state.projects.find(item => item.id === state.libraryProjectId);
+  const scope = state.libraryDetailScope;
+  const detailExperiment = scope?.type === 'experiment' ? state.experiments[scope.id] : null;
+  const detailDataset = scope?.type === 'dataset' ? state.datasets[scope.id] : null;
+  const projectId = scope?.type === 'project' ? scope.id : detailDataset?.projectId || detailExperiment?.projectId || state.libraryProjectId;
+  const owner = state.projects.find(item => item.id === projectId);
   return owner?.task || 'classification';
+}
+
+function libraryDetailScopeV8(allRows) {
+  const scope = state.libraryDetailScope;
+  if (!scope) return null;
+  let rows = [];
+  let owner = null;
+  let set = null;
+  let item = null;
+  if (scope.type === 'project') {
+    owner = state.projects.find(entry => entry.id === scope.id);
+    rows = allRows.filter(row => row.item.projectId === scope.id);
+  } else if (scope.type === 'dataset') {
+    set = state.datasets[scope.id];
+    owner = state.projects.find(entry => entry.id === set?.projectId);
+    rows = allRows.filter(row => row.item.projectId === set?.projectId && row.item.datasetId === scope.id);
+  } else {
+    item = state.experiments[scope.id];
+    owner = state.projects.find(entry => entry.id === item?.projectId);
+    set = state.datasets[item?.datasetId];
+    rows = allRows.filter(row => row.item.id === scope.id);
+  }
+  if (!owner || !rows.length) return null;
+  return { scope, rows, owner, set, item };
 }
 
 function sortProjectLibraryRowsV8(rows) {
@@ -390,26 +419,32 @@ function modelLibraryIndexV8(allRows) {
   const typeOptions = types.map(type => `<option value="${type}" ${type === state.libraryModelType ? 'selected' : ''}>${modelName(type)}</option>`).join('');
   const filters = `<div class="library-toolbar library-index-filters"><label>项目<select data-v6-library-project><option value="all">全部项目</option>${projectOptions}</select></label><label>数据集<select data-v6-library-dataset><option value="all">全部数据集</option>${datasetOptions}</select></label><label>模型类型<select data-v6-library-type><option value="all">全部模型</option>${typeOptions}</select></label><span class="library-sort-fixed">按创建时间从新到旧</span></div>`;
   if (!allRows.length) return emptyLibraryV8(false);
-  const table = visible.length ? `<div class="table-card library-table-wrap library-index-table"><table><thead><tr><th>项目</th><th>数据集</th><th>模型实验</th><th>模型类型</th><th>已保存方案</th><th>创建时间</th></tr></thead><tbody>${visible.map(entry => { const owner = state.projects.find(item => item.id === entry.item.projectId); const set = state.datasets[entry.item.datasetId]; return `<tr class="library-index-row" data-library-open-experiment="${entry.item.id}" tabindex="0" role="button" aria-label="比较 ${esc(set?.name || '当前数据集')} 下的模型"><td>${esc(owner?.name || '项目已删除')}</td><td>${esc(set?.name || '数据集已删除')}</td><td><b>${esc(entry.item.name)}</b><small>点击比较同数据集模型</small></td><td>${modelName(entry.item.type)}</td><td><span class="library-scheme-count">${entry.rows.length} 个方案</span></td><td class="library-created">${entry.createdAt}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty-state"><h2>当前筛选范围暂无模型</h2><p>调整项目、数据集或模型类型筛选后重试。</p></div>';
+  const table = visible.length ? `<div class="table-card library-table-wrap library-index-table"><table><thead><tr><th>项目</th><th>数据集</th><th>模型实验</th><th>模型类型</th><th>已保存方案</th><th>创建时间</th></tr></thead><tbody>${visible.map(entry => { const owner = state.projects.find(item => item.id === entry.item.projectId); const set = state.datasets[entry.item.datasetId]; return `<tr class="library-index-row"><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:project:${entry.item.projectId}">${esc(owner?.name || '项目已删除')}</button></td><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:dataset:${entry.item.datasetId}">${esc(set?.name || '数据集已删除')}</button></td><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:experiment:${entry.item.id}">${esc(entry.item.name)}</button></td><td>${modelName(entry.item.type)}</td><td><span class="library-scheme-count">${entry.rows.length} 个方案</span></td><td class="library-created">${entry.createdAt}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty-state"><h2>当前筛选范围暂无模型</h2><p>调整项目、数据集或模型类型筛选后重试。</p></div>';
   return `${filters}${table}`;
 }
 
-function modelLibraryDetailV8(rows, sourceItem) {
-  const item = sourceItem || rows[0]?.item;
-  if (!item) return '';
-  const owner = state.projects.find(entry => entry.id === item.projectId);
-  const set = state.datasets[item.datasetId];
+function modelLibraryDetailV8(detail) {
+  const { scope, rows, owner, set, item } = detail;
   const task = owner?.task || 'classification';
   const selected = selectedMetricsV8('library', task);
   if (!selected.includes(state.librarySort)) state.librarySort = selected[0];
   const sortedRows = sortProjectLibraryRowsV8(rows);
   const metrics = selected.map(key => metricByKeyV8(key, task));
   const tools = `<div class="library-compact-tools">${metricPickerV8('library', task)}${compareTrainingToggleV8('library')}<span class="validation-sort-note">默认展示验证集；点击指标表头排序</span></div>`;
+  const datasetCount = new Set(rows.map(row => row.item.datasetId)).size;
   const experimentCount = new Set(rows.map(row => row.item.id)).size;
   const modelCount = new Set(rows.map(row => row.item.type)).size;
-  const context = `<div class="library-detail-context"><span><b>项目</b>${esc(owner?.name || '项目已删除')}</span><span><b>数据集</b>${esc(set?.name || '数据集已删除')}</span><span><b>模型实验</b>${experimentCount} 个</span><span><b>模型类型</b>${modelCount} 种</span><span><b>已保存方案</b>${rows.length} 个</span></div>`;
-  const table = `<div class="table-card library-table-wrap sticky-action-table library-detail-table"><table><thead><tr><th>模型实验</th><th>模型类型</th><th>参数方案</th>${metrics.map(metric => metricSortHeaderV8('library', metric, state.librarySort)).join('')}<th>创建时间</th><th class="sticky-action-column">操作</th></tr></thead><tbody>${sortedRows.map(({ item: rowItem, result }) => `<tr><td><b>${esc(rowItem.name)}</b></td><td>${modelName(rowItem.type)}</td><td>${schemeCellV8(rowItem, result)}</td>${metrics.map(metric => metricValueCellV8(rowItem, result, metric, 'library')).join('')}<td class="library-created">${savedResultCreatedAtV7(rowItem, result)}</td><td class="sticky-action-column"><div class="row-actions">${button('查看训练结果', `library-result:${rowItem.id}:${result.id}`)}${button('查看模型报告', `library-report-v7:${rowItem.id}:${result.id}`, 'primary')}${button('生成 API 配置', `open-api-config:${rowItem.id}:${result.id}`)}</div></td></tr>`).join('')}</tbody></table></div>`;
-  return `${context}${tools}${table}${metricGuideV8(task, 'v8-library-guide')}`;
+  const scopeContext = scope.type === 'project'
+    ? `<span><b>项目</b>${esc(owner.name)}</span><span><b>数据集</b>${datasetCount} 个</span><span><b>模型实验</b>${experimentCount} 个</span>`
+    : scope.type === 'dataset'
+      ? `<span><b>项目</b>${esc(owner.name)}</span><span><b>数据集</b>${esc(set?.name || '数据集已删除')}</span><span><b>模型实验</b>${experimentCount} 个</span>`
+      : `<span><b>项目</b>${esc(owner.name)}</span><span><b>数据集</b>${esc(set?.name || '数据集已删除')}</span><span><b>模型实验</b>${esc(item?.name || '模型已删除')}</span>`;
+  const modelContext = scope.type === 'experiment' ? `<span><b>模型类型</b>${modelName(item?.type)}</span>` : `<span><b>模型类型</b>${modelCount} 种</span>`;
+  const context = `<div class="library-detail-context">${scopeContext}${modelContext}<span><b>已保存方案</b>${rows.length} 个</span></div>`;
+  const risk = scope.type === 'project' && datasetCount > 1 ? `<div class="library-risk-note"><b>跨数据集比较风险</b><span>不同数据集的样本分布、目标尺度和划分可能不同，指标数值不能直接代表模型优劣。请优先在同一数据集内比较，并结合业务基线判断。</span></div>` : '';
+  const leadingHeaders = `${scope.type === 'project' ? '<th>数据集</th>' : ''}${scope.type !== 'experiment' ? '<th>模型实验</th><th>模型类型</th>' : ''}`;
+  const table = `<div class="table-card library-table-wrap sticky-action-table library-detail-table"><table><thead><tr>${leadingHeaders}<th>参数方案</th>${metrics.map(metric => metricSortHeaderV8('library', metric, state.librarySort)).join('')}<th>创建时间</th><th class="sticky-action-column">操作</th></tr></thead><tbody>${sortedRows.map(({ item: rowItem, result }) => { const leadingCells = `${scope.type === 'project' ? `<td>${esc(state.datasets[rowItem.datasetId]?.name || '数据集已删除')}</td>` : ''}${scope.type !== 'experiment' ? `<td><b>${esc(rowItem.name)}</b></td><td>${modelName(rowItem.type)}</td>` : ''}`; return `<tr>${leadingCells}<td>${schemeCellV8(rowItem, result)}</td>${metrics.map(metric => metricValueCellV8(rowItem, result, metric, 'library')).join('')}<td class="library-created">${savedResultCreatedAtV7(rowItem, result)}</td><td class="sticky-action-column"><div class="row-actions">${button('查看训练结果', `library-result:${rowItem.id}:${result.id}`)}${button('查看模型报告', `library-report-v7:${rowItem.id}:${result.id}`, 'primary')}${button('生成 API 配置', `open-api-config:${rowItem.id}:${result.id}`)}</div></td></tr>`; }).join('')}</tbody></table></div>`;
+  return `${context}${risk}${tools}${table}${metricGuideV8(task, 'v8-library-guide')}`;
 }
 
 function libraryServicesV8() {
@@ -424,28 +459,27 @@ function emptyLibraryV8(projectScope) {
 
 modelsPage = function () {
   const allRows = allLibraryRowsV8();
-  const detailItem = state.experiments[state.libraryDetailExperimentId] || null;
-  const detailRows = detailItem ? allRows.filter(row => row.item.projectId === detailItem.projectId && row.item.datasetId === detailItem.datasetId) : [];
-  if (state.libraryDetailExperimentId && !detailRows.length) state.libraryDetailExperimentId = null;
-  const headAction = detailItem ? button('返回模型列表', 'close-library-detail-v8') : '';
-  const detailSet = detailItem ? state.datasets[detailItem.datasetId] : null;
-  const subtitle = detailItem ? `${esc(detailSet?.name || '当前数据集')} · 比较同项目、同数据集下不同模型的已保存方案。` : '筛选并打开模型实验；模型按创建时间从新到旧排列。';
-  const compare = detailItem ? modelLibraryDetailV8(detailRows, detailItem) : modelLibraryIndexV8(allRows);
+  const detail = libraryDetailScopeV8(allRows);
+  if (state.libraryDetailScope && !detail) state.libraryDetailScope = null;
+  const headAction = detail ? button('返回模型列表', 'close-library-detail-v8') : '';
+  const subtitle = detail ? detail.scope.type === 'project' ? `${esc(detail.owner.name)} · 跨数据集比较项目内全部模型。` : detail.scope.type === 'dataset' ? `${esc(detail.set?.name || '当前数据集')} · 比较该数据集下全部模型。` : `${esc(detail.item?.name || '当前模型实验')} · 比较全部已保存参数方案。` : '筛选模型；点击项目、数据集或模型实验名称进入对应范围的比较。';
+  const compare = detail ? modelLibraryDetailV8(detail) : modelLibraryIndexV8(allRows);
   return shell(`${pageHead('模型库', subtitle, headAction)}<div class="library-tabs"><button data-action="library-tab:compare" class="${state.libraryTab === 'compare' ? 'active' : ''}">模型比较</button><button data-action="library-tab:api" class="${state.libraryTab === 'api' ? 'active' : ''}">API 服务</button></div>${state.libraryTab === 'api' ? libraryServicesV8() : compare}`);
 };
 
 const previousActionV8 = action;
 action = function (name) {
-  if (name.startsWith('open-library-experiment-v8:')) {
-    state.libraryDetailExperimentId = name.split(':')[1];
+  if (name.startsWith('open-library-scope-v8:')) {
+    const [, type, id] = name.split(':');
+    state.libraryDetailScope = { type, id };
     const task = activeLibraryTaskV8();
     state.librarySort = task === 'regression' ? 'rmse' : 'auc';
     state.metricPickerOpenV8 = null;
     save(); return render();
   }
-  if (name === 'close-library-detail-v8') { state.libraryDetailExperimentId = null; state.librarySort = 'createdAt'; state.metricPickerOpenV8 = null; save(); return render(); }
-  if (name.startsWith('library-project-v8:')) { state.libraryDetailExperimentId = null; state.libraryProjectId = name.split(':')[1]; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); return render(); }
-  if (name === 'library-all-v8') { state.libraryDetailExperimentId = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); return render(); }
+  if (name === 'close-library-detail-v8') { state.libraryDetailScope = null; state.librarySort = 'createdAt'; state.metricPickerOpenV8 = null; save(); return render(); }
+  if (name.startsWith('library-project-v8:')) { state.libraryDetailScope = { type: 'project', id: name.split(':')[1] }; state.librarySort = 'createdAt'; save(); return render(); }
+  if (name === 'library-all-v8') { state.libraryDetailScope = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); return render(); }
   if (name.startsWith('library-filter-v8:')) {
     const [, kind, value] = name.split(':');
     if (kind === 'dataset') { state.libraryDatasetId = value; state.libraryModelType = 'all'; }
@@ -485,7 +519,9 @@ action = function (name) {
   if (name === 'preview-correlation') return correlationPreviewModalV8();
   if (name === 'confirm-correlation-v8') return applyCorrelationRecommendationV8();
   if (name === 'go-projects-v8') return go('projects');
-  if (name === 'project-models' || name === 'dataset-models-v7' || name === 'save-library-results') { state.libraryDetailExperimentId = null; state.librarySort = 'createdAt'; }
+  if (name === 'project-models') { state.libraryDetailScope = { type: 'project', id: project().id }; state.librarySort = project().task === 'regression' ? 'rmse' : 'auc'; }
+  if (name === 'dataset-models-v7') { state.libraryDetailScope = { type: 'dataset', id: dataset().id }; state.librarySort = project().task === 'regression' ? 'rmse' : 'auc'; }
+  if (name === 'save-library-results') { state.libraryDetailScope = null; state.librarySort = 'createdAt'; }
   if (name.startsWith('delete-entity:project:')) {
     const result = previousActionV8(name);
     if (!state.projects.length) { state.page = 'projects'; save(); return render(); }
@@ -562,11 +598,6 @@ bind = function () {
     if (state.metricPickerOpenV8 === picker.dataset.v8PickerArea) picker.open = true;
     picker.ontoggle = () => { if (!picker.open && state.metricPickerOpenV8 === picker.dataset.v8PickerArea) { state.metricPickerOpenV8 = null; save(); } };
   });
-  app.querySelectorAll('[data-library-open-experiment]').forEach(row => {
-    const open = () => action(`open-library-experiment-v8:${row.dataset.libraryOpenExperiment}`);
-    row.onclick = open;
-    row.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } };
-  });
   const projectFilter = document.querySelector('[data-v6-library-project]');
   if (projectFilter) { const clean = projectFilter.cloneNode(true); projectFilter.replaceWith(clean); clean.onchange = event => { state.libraryProjectId = event.target.value; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); render(); }; }
   const datasetFilter = document.querySelector('[data-v6-library-dataset]');
@@ -574,7 +605,7 @@ bind = function () {
   const modelFilter = document.querySelector('[data-v6-library-type]');
   if (modelFilter) { const clean = modelFilter.cloneNode(true); modelFilter.replaceWith(clean); clean.onchange = event => { state.libraryModelType = event.target.value; state.librarySort = 'createdAt'; save(); render(); }; }
   const globalModels = app.querySelector('.main-nav [data-page="models"]');
-  if (globalModels) globalModels.onclick = () => { state.libraryDetailExperimentId = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; state.libraryTab = 'compare'; save(); go('models'); };
+  if (globalModels) globalModels.onclick = () => { state.libraryDetailScope = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; state.libraryTab = 'compare'; save(); go('models'); };
   app.querySelectorAll('[data-v8-hover-preview]').forEach(control => control.onclick = event => { event.stopPropagation(); const [id, delta] = control.dataset.v8HoverPreview.split(':'); state.hoverPreviewPage ||= {}; state.hoverPreviewPage[id] = Math.max(0, (state.hoverPreviewPage[id] || 0) + Number(delta)); state.hoverTab ||= {}; state.hoverTab[id] = 'preview'; save(); render(); });
 };
 
