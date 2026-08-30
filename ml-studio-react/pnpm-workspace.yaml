@@ -1,0 +1,9 @@
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true
+confirmModulesPurge: false
+enableGlobalVirtualStore: false
+nodeLinker: hoisted
+verifyDepsBeforeRun: false
