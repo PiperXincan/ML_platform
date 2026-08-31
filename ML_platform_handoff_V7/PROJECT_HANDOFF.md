@@ -11,7 +11,7 @@
 - 技术形态：原生 HTML、CSS、JavaScript，使用 `LocalStorage` 保存演示状态，无构建步骤。
 - 仓库：[PiperXincan/ML_platform](https://github.com/PiperXincan/ML_platform)
 - 当前主分支：`main`
-- 当前已推送提交：`d2ec153 Update frontend to V7 requirements`
+- 整合前回退提交：`77d8730 fix: refine threshold feedback and library filters`
 
 ## 2. 事实来源优先级
 
@@ -28,18 +28,13 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `index.html` | 当前页面入口，按顺序加载 V3–V7 的 CSS 和 JavaScript |
-| `v3.js` / `v3.css` | 基础数据、页面结构、项目/数据集/实验/报告主流程 |
-| `v3-overrides.css` | V3 样式修正 |
-| `v4.js` / `v4.css` | 数据集弹窗、特征准备、模型库、API 演示等扩展 |
-| `v5.js` / `v5.css` | 特征阈值、相关性、模型参数、删除、结果保存逻辑 |
-| `v6.js` / `v6.css` | V6 主流程、训练弹窗、训练/验证结果、全局模型库等 |
-| `v7.js` / `v7.css` | V7 增量：结果直达、参数推荐值、保存去重、模型库明细 |
+| `index.html` | 当前页面入口，只加载 `app.css` 和 `app.js` |
+| `app.js` | 当前完整 JavaScript；按原 V3–V8 执行顺序合并，使用来源注释划分历史代码段 |
+| `app.css` | 当前完整样式；按原 V3–V8 层叠顺序合并，使用来源注释划分历史代码段 |
 | `frontend-change-requirements-v7.md` | 当前前端修改需求基线 |
-| `机器学习训练平台前端开发文档.md` | 当前完整开发文档 V7 |
-| `app.js`、`v2.js`、`styles.css` | 旧版遗留文件，当前 `index.html` 不加载 |
+| `机器学习训练平台前端开发文档.md` | 当前完整开发文档 V8.9.2 |
 
-当前采用版本叠加方式：后加载的 V7 覆盖前面版本。除非用户明确要求重构，否则不要合并或删除旧版本文件，避免造成已确认功能回退。
+当前采用单入口文件结构。原 V3–V8 的执行和层叠顺序已原样保留在 `app.js` 与 `app.css` 中；后续修改直接编辑这两个文件，不再新增 `v9.js`、`v9.css` 一类增量文件。需要追溯旧版本时使用 Git 历史和版本标签。
 
 ## 4. 已完成页面与组件
 
@@ -191,7 +186,6 @@ python -m http.server 4173 --bind 127.0.0.1
 
 1. 先阅读 `frontend-change-requirements-v7.md` 和本文件。
 2. 对照 `机器学习训练平台前端开发文档.md` 判断是否需要同步更新文档。
-3. 只修改用户指定范围，优先在 `v7.js` / `v7.css` 或新版本增量文件中实现。
+3. 只修改用户指定范围；脚本统一修改 `app.js`，样式统一修改 `app.css`，不要再创建按版本递增的脚本或样式文件。
 4. 回归分类和回归两条主流程，特别检查底部按钮、训练弹窗、结果保存和模型库。
 5. 修改完成后执行 JavaScript 语法检查和浏览器控制台检查。
-
