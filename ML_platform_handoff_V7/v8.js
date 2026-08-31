@@ -11,6 +11,31 @@ state.libraryDetailExperimentId = null;
 state.libraryReturnContext = state.libraryReturnContext && ['project', 'dataset'].includes(state.libraryReturnContext.page) && typeof state.libraryReturnContext.projectId === 'string' ? state.libraryReturnContext : null;
 state.libraryDetailDatasetId = typeof state.libraryDetailDatasetId === 'string' ? state.libraryDetailDatasetId : 'all';
 state.libraryDetailModelType = typeof state.libraryDetailModelType === 'string' ? state.libraryDetailModelType : 'all';
+const libraryIndexSortKeysV88 = ['project', 'dataset', 'experiment', 'modelType', 'schemeCount', 'createdAt'];
+state.libraryIndexSortKey = libraryIndexSortKeysV88.includes(state.libraryIndexSortKey) ? state.libraryIndexSortKey : 'createdAt';
+state.libraryIndexSortDirection = ['asc', 'desc'].includes(state.libraryIndexSortDirection) ? state.libraryIndexSortDirection : 'desc';
+
+const businessThresholdRangesV88 = {
+  missing: { label: '缺失率上限', min: 0, max: 99, step: 1, hint: '0–99%' },
+  iv: { label: 'IV 下限', min: 0, max: .8, step: .01, hint: '0–0.8' },
+  psi: { label: 'PSI 上限', min: .05, max: .8, step: .01, hint: '0.05–0.8' },
+  variance: { label: '低方差阈值', min: 0, max: .5, step: .01, hint: '0–0.5' },
+  targetCorrelation: { label: '目标相关性下限', min: 0, max: .95, step: .01, hint: '0–0.95' },
+  correlation: { label: '相关性预警阈值', min: .3, max: .99, step: .01, hint: '0.3–0.99' }
+};
+
+datasetHover = function () { return ''; };
+
+validateFeatureThresholdsV7 = function (values) {
+  const keys = ['missing', 'psi', ...(project().task === 'classification' ? ['iv'] : ['variance', 'targetCorrelation'])];
+  const invalidKey = keys.find(key => {
+    const range = businessThresholdRangesV88[key];
+    return !Number.isFinite(values[key]) || values[key] < range.min || values[key] > range.max;
+  });
+  if (!invalidKey) return '';
+  const range = businessThresholdRangesV88[invalidKey];
+  return `${range.label}必须在 ${range.hint} 之间。`;
+};
 
 exampleColumns.loan ||= [
   { name: '申请编号', type: 'text', missing: 0, unique: 5000, trainable: false, reason: '疑似 ID，唯一值接近样本数', iv: .001, psi: .02, included: false },
@@ -399,6 +424,38 @@ function sortLibraryRowsByCreatedV8(rows) {
   return [...rows].sort((first, second) => libraryCreatedAtScoreV8(savedResultCreatedAtV7(second.item, second.result)) - libraryCreatedAtScoreV8(savedResultCreatedAtV7(first.item, first.result)));
 }
 
+function libraryIndexSortValueV88(entry, key) {
+  if (key === 'project') return state.projects.find(item => item.id === entry.item.projectId)?.name || '';
+  if (key === 'dataset') return state.datasets[entry.item.datasetId]?.name || '';
+  if (key === 'experiment') return entry.item.name || '';
+  if (key === 'modelType') return modelName(entry.item.type);
+  if (key === 'schemeCount') return entry.rows.length;
+  return libraryCreatedAtScoreV8(entry.createdAt);
+}
+
+function sortLibraryIndexEntriesV88(entries) {
+  const key = state.libraryIndexSortKey;
+  const direction = state.libraryIndexSortDirection === 'asc' ? 1 : -1;
+  return [...entries].sort((first, second) => {
+    const firstValue = libraryIndexSortValueV88(first, key);
+    const secondValue = libraryIndexSortValueV88(second, key);
+    const compared = typeof firstValue === 'number' && typeof secondValue === 'number' ? firstValue - secondValue : String(firstValue).localeCompare(String(secondValue), 'zh-CN', { numeric: true, sensitivity: 'base' });
+    return compared === 0 ? libraryCreatedAtScoreV8(second.createdAt) - libraryCreatedAtScoreV8(first.createdAt) : compared * direction;
+  });
+}
+
+function libraryIndexHeaderV88(label, key, filter = '') {
+  const active = state.libraryIndexSortKey === key;
+  const arrow = active ? state.libraryIndexSortDirection === 'asc' ? '↑' : '↓' : '↕';
+  const direction = active ? state.libraryIndexSortDirection === 'asc' ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序' : '点击排序';
+  return `<th class="library-index-heading ${active ? 'active-sort' : ''}"><div class="library-index-heading-row"><span>${label}</span><button data-action="sort-library-index-v88:${key}" aria-label="${label}${direction}" title="${direction}">${arrow}</button></div>${filter}</th>`;
+}
+
+function libraryIndexFilterV89(kind, currentLabel, options) {
+  const label = kind === 'project' ? '项目' : kind === 'dataset' ? '数据集' : '模型类型';
+  return `<div class="library-index-filter-panel" role="menu" aria-label="筛选${label}"><div class="library-index-filter-current"><span>筛选${label}</span><b>${esc(currentLabel)}</b></div>${options.map(option => `<button type="button" role="menuitem" class="${option.selected ? 'selected' : ''}" data-action="filter-library-index-v89:${kind}:${option.value}"><span>${esc(option.label)}</span>${option.selected ? '<i>✓</i>' : ''}</button>`).join('')}</div>`;
+}
+
 function libraryExperimentEntriesV8(rows) {
   const grouped = new Map();
   rows.forEach(row => {
@@ -467,14 +524,14 @@ function modelLibraryIndexV8(allRows) {
   const datasetEntries = projectEntries.filter(entry => state.libraryDatasetId === 'all' || entry.item.datasetId === state.libraryDatasetId);
   const types = [...new Set(datasetEntries.map(entry => entry.item.type))];
   if (state.libraryModelType !== 'all' && !types.includes(state.libraryModelType)) state.libraryModelType = 'all';
-  const visible = datasetEntries.filter(entry => state.libraryModelType === 'all' || entry.item.type === state.libraryModelType).sort((first, second) => libraryCreatedAtScoreV8(second.createdAt) - libraryCreatedAtScoreV8(first.createdAt));
-  const projectOptions = state.projects.map(item => `<option value="${item.id}" ${item.id === state.libraryProjectId ? 'selected' : ''}>${esc(item.name)}</option>`).join('');
-  const datasetOptions = datasetIds.map(id => `<option value="${id}" ${id === state.libraryDatasetId ? 'selected' : ''}>${esc(state.datasets[id]?.name || '数据集已删除')}</option>`).join('');
-  const typeOptions = types.map(type => `<option value="${type}" ${type === state.libraryModelType ? 'selected' : ''}>${modelName(type)}</option>`).join('');
-  const filters = `<div class="library-toolbar library-index-filters"><label>项目<select data-v6-library-project><option value="all">全部项目</option>${projectOptions}</select></label><label>数据集<select data-v6-library-dataset><option value="all">全部数据集</option>${datasetOptions}</select></label><label>模型类型<select data-v6-library-type><option value="all">全部模型</option>${typeOptions}</select></label><span class="library-sort-fixed">按创建时间从新到旧</span></div>`;
+  const visible = sortLibraryIndexEntriesV88(datasetEntries.filter(entry => state.libraryModelType === 'all' || entry.item.type === state.libraryModelType));
   if (!allRows.length) return emptyLibraryV8(false);
-  const table = visible.length ? `<div class="table-card library-table-wrap library-index-table"><table><thead><tr><th>项目</th><th>数据集</th><th>模型实验</th><th>模型类型</th><th>已保存方案</th><th>创建时间</th></tr></thead><tbody>${visible.map(entry => { const owner = state.projects.find(item => item.id === entry.item.projectId); const set = state.datasets[entry.item.datasetId]; return `<tr class="library-index-row"><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:project:${entry.item.projectId}">${esc(owner?.name || '项目已删除')}</button></td><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:dataset:${entry.item.datasetId}">${esc(set?.name || '数据集已删除')}</button></td><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:experiment:${entry.item.id}">${esc(entry.item.name)}</button></td><td>${modelName(entry.item.type)}</td><td><span class="library-scheme-count">${entry.rows.length} 个方案</span></td><td class="library-created">${entry.createdAt}</td></tr>`; }).join('')}</tbody></table></div>` : '<div class="empty-state"><h2>当前筛选范围暂无模型</h2><p>调整项目、数据集或模型类型筛选后重试。</p></div>';
-  return `${filters}${table}`;
+  const projectFilter = libraryIndexFilterV89('project', state.libraryProjectId === 'all' ? '全部项目' : state.projects.find(item => item.id === state.libraryProjectId)?.name || '全部项目', [{ value: 'all', label: '全部项目', selected: state.libraryProjectId === 'all' }, ...state.projects.map(item => ({ value: item.id, label: item.name, selected: item.id === state.libraryProjectId }))]);
+  const datasetFilter = libraryIndexFilterV89('dataset', state.libraryDatasetId === 'all' ? '全部数据集' : state.datasets[state.libraryDatasetId]?.name || '全部数据集', [{ value: 'all', label: '全部数据集', selected: state.libraryDatasetId === 'all' }, ...datasetIds.map(id => ({ value: id, label: state.datasets[id]?.name || '数据集已删除', selected: id === state.libraryDatasetId }))]);
+  const typeFilter = libraryIndexFilterV89('model', state.libraryModelType === 'all' ? '全部模型' : modelName(state.libraryModelType), [{ value: 'all', label: '全部模型', selected: state.libraryModelType === 'all' }, ...types.map(type => ({ value: type, label: modelName(type), selected: type === state.libraryModelType }))]);
+  const headers = `${libraryIndexHeaderV88('项目', 'project', projectFilter)}${libraryIndexHeaderV88('数据集', 'dataset', datasetFilter)}${libraryIndexHeaderV88('模型实验', 'experiment')}${libraryIndexHeaderV88('模型类型', 'modelType', typeFilter)}${libraryIndexHeaderV88('已保存方案', 'schemeCount')}${libraryIndexHeaderV88('创建时间', 'createdAt')}`;
+  const body = visible.length ? visible.map(entry => { const owner = state.projects.find(item => item.id === entry.item.projectId); const set = state.datasets[entry.item.datasetId]; return `<tr class="library-index-row"><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:project:${entry.item.projectId}">${esc(owner?.name || '项目已删除')}</button></td><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:dataset:${entry.item.datasetId}">${esc(set?.name || '数据集已删除')}</button></td><td><button class="text-link library-scope-link" data-action="open-library-scope-v8:experiment:${entry.item.id}">${esc(entry.item.name)}</button></td><td>${modelName(entry.item.type)}</td><td><span class="library-scheme-count">${entry.rows.length} 个方案</span></td><td class="library-created">${entry.createdAt}</td></tr>`; }).join('') : '<tr><td colspan="6"><div class="empty-state"><h2>当前筛选范围暂无模型</h2><p>调整表头中的项目、数据集或模型类型筛选后重试。</p></div></td></tr>';
+  return `<div class="table-card library-table-wrap library-index-table"><table><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 function modelLibraryDetailV8(detail) {
@@ -590,6 +647,23 @@ action = function (name) {
     state.metricPickerOpenV8 = null;
     save(); return render();
   }
+  if (name.startsWith('sort-library-index-v88:')) {
+    const key = name.split(':')[1];
+    if (!libraryIndexSortKeysV88.includes(key)) return;
+    if (state.libraryIndexSortKey === key) state.libraryIndexSortDirection = state.libraryIndexSortDirection === 'asc' ? 'desc' : 'asc';
+    else {
+      state.libraryIndexSortKey = key;
+      state.libraryIndexSortDirection = ['schemeCount', 'createdAt'].includes(key) ? 'desc' : 'asc';
+    }
+    save(); return render();
+  }
+  if (name.startsWith('filter-library-index-v89:')) {
+    const [, kind, value] = name.split(':');
+    if (kind === 'project') { state.libraryProjectId = value; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; }
+    if (kind === 'dataset') { state.libraryDatasetId = value; state.libraryModelType = 'all'; }
+    if (kind === 'model') state.libraryModelType = value;
+    save(); return render();
+  }
   if (name === 'return-library-source-v86') {
     const context = state.libraryReturnContext;
     state.libraryReturnContext = null;
@@ -609,7 +683,7 @@ action = function (name) {
   }
   if (name === 'close-library-detail-v8') { state.libraryReturnContext = null; state.libraryDetailScope = null; state.librarySort = 'createdAt'; state.metricPickerOpenV8 = null; save(); return render(); }
   if (name.startsWith('library-project-v8:')) { state.libraryDetailScope = { type: 'project', id: name.split(':')[1] }; state.libraryDetailDatasetId = 'all'; state.libraryDetailModelType = 'all'; state.librarySort = 'createdAt'; save(); return render(); }
-  if (name === 'library-all-v8') { state.libraryDetailScope = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); return render(); }
+  if (name === 'library-all-v8') { state.libraryDetailScope = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.libraryIndexSortKey = 'createdAt'; state.libraryIndexSortDirection = 'desc'; state.librarySort = 'createdAt'; save(); return render(); }
   if (name.startsWith('library-filter-v8:')) {
     const [, kind, value] = name.split(':');
     if (kind === 'dataset') { state.libraryDatasetId = value; state.libraryModelType = 'all'; }
@@ -648,10 +722,22 @@ action = function (name) {
   }
   if (name === 'preview-correlation') return correlationPreviewModalV8();
   if (name === 'confirm-correlation-v8') return applyCorrelationRecommendationV8();
+  if (name === 'confirm-correlation-threshold') {
+    const input = document.querySelector('[data-correlation-draft]');
+    const value = Number(input?.value);
+    const range = businessThresholdRangesV88.correlation;
+    if (!Number.isFinite(value) || value < range.min || value > range.max) return toast(`${range.label}必须在 ${range.hint} 之间。`);
+    state.featureThresholds.correlation = value;
+    save(); render(); return toast('相关性预警阈值已更新。');
+  }
+  if (name === 'confirm-thresholds') {
+    const empty = [...document.querySelectorAll('[data-threshold]')].find(input => !input.value.trim());
+    if (empty) return toast('请输入有效的筛选阈值。');
+  }
   if (name === 'go-projects-v8') return go('projects');
   if (name === 'project-models') { state.libraryReturnContext = { page: 'project', projectId: project().id, datasetId: dataset()?.id || null }; state.libraryDetailScope = { type: 'project', id: project().id }; state.libraryDetailDatasetId = 'all'; state.libraryDetailModelType = 'all'; state.librarySort = project().task === 'regression' ? 'rmse' : 'auc'; }
   if (name === 'dataset-models-v7') { state.libraryReturnContext = { page: 'dataset', projectId: project().id, datasetId: dataset().id }; state.libraryDetailScope = { type: 'dataset', id: dataset().id }; state.librarySort = project().task === 'regression' ? 'rmse' : 'auc'; }
-  if (name === 'save-library-results') { state.libraryReturnContext = null; state.libraryDetailScope = null; state.librarySort = 'createdAt'; }
+  if (name === 'save-library-results') { state.libraryReturnContext = null; state.libraryDetailScope = null; state.libraryIndexSortKey = 'createdAt'; state.libraryIndexSortDirection = 'desc'; state.librarySort = 'createdAt'; }
   if (name.startsWith('delete-entity:project:')) {
     const result = previousActionV8(name);
     if (!state.projects.length) { state.page = 'projects'; save(); return render(); }
@@ -677,6 +763,47 @@ function enhanceEmptyStatesV8() {
     app.querySelectorAll('[data-action="new-experiment"]').forEach(control => control.remove());
     app.querySelector('.experiment-grid')?.replaceWith(document.createRange().createContextualFragment(`<div class="empty-state empty-state-action"><h2>还没有模型实验</h2><p>创建模型实验并配置预处理、模型参数和调参方式。</p>${button('创建模型实验', 'new-experiment', 'primary')}</div>`));
   }
+}
+
+function enhanceRemovedDatasetHoverV88() {
+  if (state.page !== 'project') return;
+  app.querySelectorAll('.dataset-hover').forEach(element => element.remove());
+  const datasetHeading = [...app.querySelectorAll('.section-title')].find(element => element.querySelector('h2')?.textContent.trim() === '数据集');
+  const note = datasetHeading?.querySelector('span');
+  if (note?.textContent.includes('悬浮')) note.textContent = '管理当前项目中的数据集和模型实验';
+}
+
+function enhanceThresholdRangesV88() {
+  if (state.page !== 'feature') return;
+  const updateMessage = (input, range) => {
+    const raw = input.value.trim();
+    const value = Number(raw);
+    const invalid = !raw || !Number.isFinite(value) || value < range.min || value > range.max;
+    input.classList.toggle('range-invalid', invalid);
+    let message = input.parentElement.querySelector('.threshold-range-error');
+    if (!invalid) {
+      if (message) message.remove();
+      return;
+    }
+    if (!message) {
+      input.insertAdjacentHTML('afterend', '<small class="threshold-range-error"></small>');
+      message = input.nextElementSibling;
+    }
+    message.textContent = raw ? `输入超出允许范围，请输入 ${range.hint}` : '请输入数值';
+  };
+  document.querySelectorAll('[data-threshold]').forEach(input => {
+    const range = businessThresholdRangesV88[input.dataset.threshold];
+    if (!range) return;
+    input.step = range.step;
+    input.addEventListener('input', () => updateMessage(input, range));
+    updateMessage(input, range);
+  });
+  const correlation = document.querySelector('[data-correlation-draft]');
+  if (!correlation) return;
+  const range = businessThresholdRangesV88.correlation;
+  correlation.step = range.step;
+  correlation.addEventListener('input', () => updateMessage(correlation, range));
+  updateMessage(correlation, range);
 }
 
 function enhanceWorkspaceSummaryV85() {
@@ -721,6 +848,7 @@ const previousBindV8 = bind;
 bind = function () {
   previousBindV8();
   enhanceEmptyStatesV8();
+  enhanceRemovedDatasetHoverV88();
   enhanceWorkspaceSummaryV85();
   enhanceProjectCardMenusV8();
   enhanceRenameControlsV85();
@@ -729,6 +857,7 @@ bind = function () {
   enhanceDatasetHoverV8();
   enhanceReportV8();
   enhanceCorrelationActionsV8();
+  enhanceThresholdRangesV88();
   app.querySelectorAll('[data-action]').forEach(element => element.onclick = event => { event.stopPropagation(); action(element.dataset.action); });
   app.querySelectorAll('.project-card-menu,.entity-card-menu').forEach(menu => menu.onclick = event => event.stopPropagation());
   app.querySelectorAll('[data-save-result]').forEach(checkbox => checkbox.onchange = () => { const item = experiment(); const selected = new Set(state.tuningSelections[item.id] || []); checkbox.checked ? selected.add(+checkbox.dataset.saveResult) : selected.delete(+checkbox.dataset.saveResult); state.tuningSelections[item.id] = [...selected]; state.tuningSelectionTouched[item.id] = true; save(); enhanceSaveButton(); });
@@ -754,17 +883,17 @@ bind = function () {
     picker.ontoggle = () => { if (!picker.open && state.metricPickerOpenV8 === picker.dataset.v8PickerArea) { state.metricPickerOpenV8 = null; save(); } };
   });
   const projectFilter = document.querySelector('[data-v6-library-project]');
-  if (projectFilter) { const clean = projectFilter.cloneNode(true); projectFilter.replaceWith(clean); clean.onchange = event => { state.libraryProjectId = event.target.value; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); render(); }; }
+  if (projectFilter) { const clean = projectFilter.cloneNode(true); projectFilter.replaceWith(clean); clean.onchange = event => { state.libraryProjectId = event.target.value; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; save(); render(); }; }
   const datasetFilter = document.querySelector('[data-v6-library-dataset]');
-  if (datasetFilter) { const clean = datasetFilter.cloneNode(true); datasetFilter.replaceWith(clean); clean.onchange = event => { state.libraryDatasetId = event.target.value; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; save(); render(); }; }
+  if (datasetFilter) { const clean = datasetFilter.cloneNode(true); datasetFilter.replaceWith(clean); clean.onchange = event => { state.libraryDatasetId = event.target.value; state.libraryModelType = 'all'; save(); render(); }; }
   const modelFilter = document.querySelector('[data-v6-library-type]');
-  if (modelFilter) { const clean = modelFilter.cloneNode(true); modelFilter.replaceWith(clean); clean.onchange = event => { state.libraryModelType = event.target.value; state.librarySort = 'createdAt'; save(); render(); }; }
+  if (modelFilter) { const clean = modelFilter.cloneNode(true); modelFilter.replaceWith(clean); clean.onchange = event => { state.libraryModelType = event.target.value; save(); render(); }; }
   const detailDatasetFilter = document.querySelector('[data-v87-library-detail-dataset]');
   if (detailDatasetFilter) detailDatasetFilter.onchange = event => { state.libraryDetailDatasetId = event.target.value; state.libraryDetailModelType = 'all'; save(); render(); };
   const detailModelFilter = document.querySelector('[data-v87-library-detail-model]');
   if (detailModelFilter) detailModelFilter.onchange = event => { state.libraryDetailModelType = event.target.value; save(); render(); };
   const globalModels = app.querySelector('.main-nav [data-page="models"]');
-  if (globalModels) globalModels.onclick = () => { state.libraryReturnContext = null; state.libraryDetailScope = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.librarySort = 'createdAt'; state.libraryTab = 'compare'; save(); go('models'); };
+  if (globalModels) globalModels.onclick = () => { state.libraryReturnContext = null; state.libraryDetailScope = null; state.libraryProjectId = 'all'; state.libraryDatasetId = 'all'; state.libraryModelType = 'all'; state.libraryIndexSortKey = 'createdAt'; state.libraryIndexSortDirection = 'desc'; state.librarySort = 'createdAt'; state.libraryTab = 'compare'; save(); go('models'); };
   app.querySelectorAll('[data-v8-hover-preview]').forEach(control => control.onclick = event => { event.stopPropagation(); const [id, delta] = control.dataset.v8HoverPreview.split(':'); state.hoverPreviewPage ||= {}; state.hoverPreviewPage[id] = Math.max(0, (state.hoverPreviewPage[id] || 0) + Number(delta)); state.hoverTab ||= {}; state.hoverTab[id] = 'preview'; save(); render(); });
 };
 
