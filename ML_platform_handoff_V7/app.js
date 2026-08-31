@@ -71,7 +71,7 @@ function makeResults(task, count) {
   });
 }
 let state;
-try { state = JSON.parse(localStorage.getItem('mlStudioV3')) || initialState(); } catch { state = initialState(); }
+try { state = JSON.parse(localStorage.getItem('mlStudioV4')) || initialState(); } catch { state = initialState(); }
 const defaultState = initialState();
 if (!state || typeof state !== 'object' || Array.isArray(state)) state = defaultState;
 state.projects = Array.isArray(state.projects) ? state.projects : defaultState.projects;
@@ -79,7 +79,7 @@ state.datasets = state.datasets && typeof state.datasets === 'object' && !Array.
 state.experiments = state.experiments && typeof state.experiments === 'object' && !Array.isArray(state.experiments) ? state.experiments : defaultState.experiments;
 if (!state.projects.length && !['home', 'projects'].includes(state.page)) state.page = 'home';
 function save() {
-  try { localStorage.setItem('mlStudioV3', JSON.stringify(state)); }
+  try { localStorage.setItem('mlStudioV4', JSON.stringify(state)); }
   catch (error) { console.warn('本地保存不可用，页面将继续使用当前会话数据。', error); }
 }
 function project() { return state.projects.find(item => item.id === state.projectId) || state.projects[0]; }
@@ -425,7 +425,14 @@ function enhanceTuningPage() {
 function enhanceSaveButton() { const buttonElement = document.querySelector('[data-action="save-library-results"]'); if (!buttonElement) return; const selected = state.tuningSelections[experiment().id] || []; buttonElement.disabled = selected.length === 0; }
 
 function enhanceReportPage() {
-  if (state.page !== 'report' || project().task !== 'classification') return; const cards = [...app.querySelectorAll('.metric-card')]; const card = cards.find(element => element.querySelector('span')?.textContent.includes('F1')); if (!card) return; card.querySelector('.help').title = '精确率与召回率的综合指标，越大越好。'; card.querySelector('small').textContent = '适合同时关注误报和漏报的场景。';
+  if (state.page !== 'report' || project().task !== 'classification') return;
+  const cards = [...app.querySelectorAll('.metric-card')];
+  const card = cards.find(element => element.querySelector('span')?.textContent.trim().startsWith('F1'));
+  const help = card?.querySelector('.help');
+  const note = card?.querySelector('small');
+  if (!card || !help || !note) return;
+  help.title = '精确率与召回率的综合指标，越大越好。';
+  note.textContent = '适合同时关注误报和漏报的场景。';
 }
 
 function enhanceModelsPage() {
@@ -1166,12 +1173,600 @@ render = function () {
     console.error('页面渲染失败', error);
     app.innerHTML = `<main style="max-width:760px;margin:72px auto;padding:32px;font-family:system-ui;color:#17233c"><h1 style="font-size:24px">页面载入失败</h1><p style="line-height:1.7;color:#526079">当前浏览器中的历史页面状态与新版结构不兼容。你的本地数据尚未被自动清除。</p><div style="display:flex;gap:12px;margin-top:24px"><button id="reload-page-v7" style="padding:10px 18px;border:0;border-radius:8px;background:#2563eb;color:white;cursor:pointer">重新载入</button><button id="reset-page-v7" style="padding:10px 18px;border:1px solid #cbd5e1;border-radius:8px;background:white;cursor:pointer">重置本地演示数据</button></div><pre style="margin-top:24px;padding:16px;white-space:pre-wrap;background:#f8fafc;border-radius:8px;color:#b42318">${esc(error?.message || error)}</pre></main>`;
     document.querySelector('#reload-page-v7').onclick = () => location.reload();
-    document.querySelector('#reset-page-v7').onclick = () => { try { localStorage.removeItem('mlStudioV3'); } catch {} location.reload(); };
+    document.querySelector('#reset-page-v7').onclick = () => { try { localStorage.removeItem('mlStudioV4'); } catch {} location.reload(); };
   }
 };
 
 save();
 render();
+
+// ============================================================================
+// V9.0.0 — 分类项目、二分类 / 多分类锁定与多分类展示
+// ============================================================================
+const SCHEMA_V9 = 4;
+const modeLabelV9 = mode => ({ binary: '二分类', multiclass: '多分类' }[mode] || '待识别');
+const taskKeyV9 = owner => owner?.task === 'regression' ? 'regression' : owner?.classificationMode === 'multiclass' ? 'multiclass' : 'classification';
+const taskLabelV9 = owner => owner?.task === 'regression' ? '回归' : owner?.classificationMode ? modeLabelV9(owner.classificationMode) : '分类（待识别）';
+const multiclassThresholdDefaultsV907 = { missing: 90, variance: .01, psi: .25 };
+const multiclassThresholdRangesV908 = {
+  missing: { label: '缺失率上限', min: 0, max: 99, step: 1, hint: '0–99' },
+  variance: { label: '归一化方差下限', min: 0, max: .25, step: .01, hint: '0–0.25' },
+  psi: { label: 'PSI 上限', min: .05, max: .8, step: .01, hint: '0.05–0.8' }
+};
+state.featureThresholds ||= {};
+Object.entries(multiclassThresholdDefaultsV907).forEach(([key, value]) => {
+  const current = Number(state.featureThresholds[key]);
+  const range = multiclassThresholdRangesV908[key];
+  if (!Number.isFinite(current) || current < range.min || current > range.max) state.featureThresholds[key] = value;
+});
+const paletteV9 = ['#2563eb', '#7c3aed', '#0f9f8f', '#f59e0b', '#ef4444', '#06b6d4', '#84cc16', '#ec4899', '#64748b', '#f97316', '#14b8a6', '#8b5cf6', '#3b82f6', '#22c55e', '#eab308', '#e11d48', '#0891b2', '#65a30d', '#9333ea', '#475569'];
+taskLabel = task => task === 'regression' ? '回归' : '分类';
+
+function classSummaryV9(set, target = set.target) {
+  const stored = set.targetValueCounts?.[target] || (target === set.target ? set.classCounts : null);
+  const counts = stored ? { ...stored } : {};
+  if (!stored) {
+    const index = set.columns.findIndex(column => column.name === target);
+    set.preview.forEach(row => {
+      const value = String(row[index] ?? '').trim();
+      if (value) counts[value] = (counts[value] || 0) + 1;
+    });
+  }
+  const entries = Object.entries(counts).filter(([label]) => String(label).trim()).sort((a, b) => b[1] - a[1]);
+  const complete = entries.reduce((sum, entry) => sum + entry[1], 0);
+  const missing = target === set.target && Number.isFinite(set.missingTargetRows) ? set.missingTargetRows : Math.max(0, set.rows - complete);
+  const mode = entries.length === 2 ? 'binary' : entries.length >= 3 && entries.length <= 20 ? 'multiclass' : null;
+  const min = entries.length ? Math.min(...entries.map(entry => entry[1])) : 0;
+  const max = entries.length ? Math.max(...entries.map(entry => entry[1])) : 0;
+  return { entries, complete, missing, mode, ratio: min ? max / min : Infinity };
+}
+function autoPositiveV9(summary) {
+  const preferred = ['是', '1', 'true', '流失', '违约', '阳性'];
+  const exact = summary.entries.find(entry => preferred.includes(String(entry[0]).toLowerCase()));
+  return exact?.[0] || [...summary.entries].sort((a, b) => a[1] - b[1])[0]?.[0] || '';
+}
+function splitMinimumV9(set) {
+  const share = Number((set.feature?.split || '80-20').split('-')[1] || 20) / 100;
+  return Math.max(2, Math.ceil(1 / share));
+}
+function validateClassesV9(set, expected = null) {
+  const summary = classSummaryV9(set);
+  if (summary.entries.length < 2) return { ok: false, summary, message: '目标列至少需要 2 个有效类别。' };
+  if (summary.entries.length > 20) return { ok: false, summary, message: `目标列包含 ${summary.entries.length} 个类别，当前仅支持 2–20 类。` };
+  if (expected && summary.mode !== expected) return { ok: false, summary, message: `项目已锁定为${modeLabelV9(expected)}，该数据集识别为${modeLabelV9(summary.mode)}；请新建项目。` };
+  const minimum = splitMinimumV9(set);
+  const weak = summary.entries.filter(entry => entry[1] < minimum);
+  if (weak.length) return { ok: false, summary, message: `当前划分要求每类至少 ${minimum} 条完整样本；${weak.map(entry => `${entry[0]}（${entry[1]}）`).join('、')}不足。` };
+  return { ok: true, summary };
+}
+function makeMultiResultsV9(count, item = {}) {
+  return Array.from({ length: count }, (_, index) => {
+    const macroF1 = +(.842 - index * .009).toFixed(3);
+    const accuracy = +(.873 - index * .007).toFixed(3);
+    const validation = { macroF1, accuracy, weightedF1: +(.858 - index * .008).toFixed(3), macroPrecision: +(.851 - index * .008).toFixed(3), macroRecall: +(.837 - index * .009).toFixed(3), logLoss: +(.421 + index * .026).toFixed(3) };
+    const gap = +(.018 + index * .004).toFixed(3);
+    const train = { ...validation, macroF1: +(macroF1 + gap).toFixed(3), accuracy: +(accuracy + gap).toFixed(3), weightedF1: +(validation.weightedF1 + gap).toFixed(3), macroPrecision: +(validation.macroPrecision + gap).toFixed(3), macroRecall: +(validation.macroRecall + gap).toFixed(3), logLoss: +Math.max(.01, validation.logLoss - gap).toFixed(3) };
+    return { id: index + 1, params: `树 ${160 + index * 25} · 深度 ${5 + index % 4}`, parameterConfig: { trees: 160 + index * 25, depth: 5 + index % 4 }, preprocessing: { missing: { numeric: '中位数填充', category: '保留为缺失类别' }, standardize: Boolean(item.standardize) }, ...validation, gap, metrics: { train, validation, gap } };
+  });
+}
+const oldMakeResultsV9 = makeResults;
+makeResults = (task, count) => task === 'multiclass' || (task === 'classification' && project()?.classificationMode === 'multiclass') ? makeMultiResultsV9(count, experiment() || {}) : oldMakeResultsV9(task, count);
+
+function demoColumnsV9(target, risk = false) {
+  return [
+    { name: risk ? '申请编号' : '客户编号', type: 'text', missing: 0, unique: risk ? 4800 : 5200, trainable: false, reason: '疑似 ID，唯一值接近样本数', psi: .02, included: false },
+    { name: risk ? '年收入' : '年度消费额', type: 'number', missing: .054, unique: 3700, trainable: true, variance: .104, psi: .12, included: true },
+    { name: risk ? '信用评分' : '近90天订单数', type: 'number', missing: .03, unique: 410, trainable: true, variance: .074, psi: .11, included: true },
+    { name: risk ? '信用评分镜像' : '年度消费额副本', type: 'number', missing: .031, unique: 405, trainable: true, variance: .073, psi: .11, included: true },
+    { name: risk ? '是否有房' : '是否会员', type: 'boolean', missing: 0, unique: 2, trainable: true, psi: .03, included: true },
+    { name: risk ? '职业类别' : '活跃渠道', type: 'category', missing: .025, unique: 6, trainable: true, psi: .06, included: true },
+    { name: '固定标记', type: 'number', missing: 0, unique: 1, trainable: true, variance: 0, psi: 0, included: false },
+    { name: risk ? '申请日期' : '注册日期', type: 'date', missing: 0, unique: 730, trainable: false, reason: '原始日期字段', psi: .04, included: false },
+    { name: target, type: 'category', missing: risk ? .018 : .032, unique: risk ? 3 : 4, trainable: true, target: true, included: false }
+  ];
+}
+function demoPreviewV9(risk = false) {
+  return risk
+    ? [['LN-1', 228000, 782, 781, true, '专业人士', 1, '2026-03-12', '低风险'], ['LN-2', 112000, 664, 665, false, '服务业', 1, '2026-04-08', '中风险'], ['LN-3', '', 542, 541, false, '自由职业', 1, '2026-04-16', '高风险']]
+    : [['CV-1', 28600, 26, 28580, true, 'APP', 1, '2021-04-12', '高价值'], ['CV-2', 7400, 8, 7420, false, '门店', 1, '2024-01-08', '成长'], ['CV-3', 1680, 2, 1670, false, '小程序', 1, '2025-06-21', '普通'], ['CV-4', '', 1, '', false, '网页', 1, '2025-11-03', '沉睡']];
+}
+if (state.schemaVersion !== SCHEMA_V9) {
+  state.schemaVersion = SCHEMA_V9;
+  const churn = state.projects.find(item => item.id === 'p-churn');
+  if (churn) Object.assign(churn, { classificationMode: 'binary', classificationModeLocked: true });
+  if (state.datasets['d-churn']) Object.assign(state.datasets['d-churn'], { classificationMode: 'binary', classCounts: { 否: 5174, 是: 1869 }, missingTargetRows: 0 });
+  const owner = { id: 'p-tier', name: '客户分层与风险识别', task: 'classification', classificationMode: 'multiclass', classificationModeLocked: true, createdAt: '2026/8/28 09:30:00', updatedAt: now(), datasets: ['d-tier', 'd-risk'] };
+  const tier = { id: 'd-tier', projectId: owner.id, name: '客户价值等级示例', uploadedAt: now(), rows: 5200, target: '客户价值等级', classificationMode: 'multiclass', classCounts: { 高价值: 520, 成长: 1040, 普通: 2080, 沉睡: 1394 }, missingTargetRows: 166, columns: demoColumnsV9('客户价值等级'), preview: demoPreviewV9(), feature: { missing: 'median', split: '80-20', revision: 1 }, experiments: ['e-tier'] };
+  const risk = { id: 'd-risk', projectId: owner.id, name: '贷款风险等级示例', uploadedAt: now(), rows: 4800, target: '贷款风险等级', classificationMode: 'multiclass', classCounts: { 低风险: 3330, 中风险: 1040, 高风险: 344 }, missingTargetRows: 86, columns: demoColumnsV9('贷款风险等级', true), preview: demoPreviewV9(true), feature: { missing: 'median', split: '80-20', revision: 1 }, experiments: [] };
+  const exp = { id: 'e-tier', projectId: owner.id, datasetId: tier.id, name: 'LGBM 多分类 01', type: 'lgbm', standardize: false, tuning: 'auto', status: 'completed', updatedAt: now(), results: makeMultiResultsV9(6), selected: 1 };
+  if (!state.projects.some(item => item.id === owner.id)) state.projects.push(owner);
+  state.datasets[tier.id] ||= tier; state.datasets[risk.id] ||= risk; state.experiments[exp.id] ||= exp;
+  state.savedResults ||= {}; state.savedResultMeta ||= {}; state.savedResultSnapshots ||= {}; state.savedResults[exp.id] = [1, 2, 3];
+  exp.results.slice(0, 3).forEach(result => { const key = `${exp.id}:${result.id}`; state.savedResultMeta[key] = { createdAt: exp.updatedAt }; state.savedResultSnapshots[key] = { experimentId: exp.id, projectId: owner.id, datasetId: tier.id, experimentName: exp.name, type: exp.type, result: structuredClone(result), createdAt: exp.updatedAt }; });
+}
+exampleColumns.tier ||= state.datasets['d-tier']?.columns; exampleColumns.risk ||= state.datasets['d-risk']?.columns;
+previews.tier ||= state.datasets['d-tier']?.preview; previews.risk ||= state.datasets['d-risk']?.preview;
+const examplesV9 = {
+  churn: { name: '客户流失示例', rows: 7043, target: '是否流失', mode: 'binary', counts: { 否: 5174, 是: 1869 }, missing: 0 },
+  loan: { name: '贷款违约示例', rows: 5000, target: '是否违约', mode: 'binary', counts: { 否: 4420, 是: 580 }, missing: 0 },
+  housing: { name: '住宅价格示例', rows: 1460, target: '房价', mode: null }, car: { name: '二手车价格示例', rows: 4200, target: '车辆价格', mode: null },
+  tier: { name: '客户价值等级示例', rows: 5200, target: '客户价值等级', mode: 'multiclass', counts: { 高价值: 520, 成长: 1040, 普通: 2080, 沉睡: 1394 }, missing: 166 },
+  risk: { name: '贷款风险等级示例', rows: 4800, target: '贷款风险等级', mode: 'multiclass', counts: { 低风险: 3330, 中风险: 1040, 高风险: 344 }, missing: 86 }
+};
+
+// V9_CHUNK_1_END
+
+function distributionV9(summary) {
+  const total = Math.max(1, summary.complete);
+  if (summary.entries.length <= 10) {
+    let cursor = 0;
+    const stops = summary.entries.map((entry, index) => { const start = cursor; cursor += entry[1] / total * 360; return `${paletteV9[index]} ${start}deg ${cursor}deg`; }).join(',');
+    return `<div class="class-distribution donut-layout"><div class="class-donut" style="background:conic-gradient(${stops})"><span><b>${summary.entries.length}</b>个类别</span></div><div class="class-legend">${summary.entries.map((entry, index) => `<div><i style="background:${paletteV9[index]}"></i><b>${esc(entry[0])}</b><span>${entry[1].toLocaleString()} · ${(entry[1] / total * 100).toFixed(1)}%</span></div>`).join('')}</div></div>`;
+  }
+  const max = Math.max(...summary.entries.map(entry => entry[1]));
+  return `<div class="class-bars">${summary.entries.map((entry, index) => `<div><b>${esc(entry[0])}</b><span><i style="width:${entry[1] / max * 100}%;background:${paletteV9[index]}"></i></span><em>${entry[1].toLocaleString()} · ${(entry[1] / total * 100).toFixed(1)}%</em></div>`).join('')}</div>`;
+}
+const oldProjectCardV9 = projectCard;
+projectCard = function (item) {
+  return oldProjectCardV9(item).replace(`<span class="task-badge ${item.task}">${taskLabel(item.task)}</span>`, `<span class="task-badge ${item.task} ${item.classificationMode || ''}">${taskLabelV9(item)}</span>`);
+};
+const oldProjectPageV9 = projectPage;
+projectPage = function () {
+  const owner = project();
+  const lock = owner.task === 'classification' ? `<div class="classification-lock ${owner.classificationModeLocked ? 'locked' : 'pending'}"><div><span>分类任务类型</span><b>${taskLabelV9(owner)}</b></div><p>${owner.classificationModeLocked ? `已由第一个有效数据集锁定；后续仅接受${modeLabelV9(owner.classificationMode)}数据集。` : '第一个数据集确认目标列后，将锁定为二分类或多分类。'}</p></div>` : '';
+  return oldProjectPageV9().replace('<div class="stats-grid">', `${lock}<div class="stats-grid">`);
+};
+newProjectModal = function () {
+  modal(`<h2>创建项目</h2><p>分类项目会在第一个有效数据集确认目标列后，自动锁定为二分类或多分类。</p><label class="field"><span>项目名称</span><input id="new-project-name" placeholder="例如：客户价值等级预测"></label><div class="field"><span>任务类型</span><div class="task-choice"><label><input type="radio" name="task" value="classification" checked> 分类</label><label><input type="radio" name="task" value="regression"> 回归</label></div></div><small>同一分类项目只允许一种分类子类型；任务不同请新建项目。</small><div class="modal-actions">${button('取消', 'close-modal')}${button('创建项目', 'confirm-project', 'primary')}</div>`);
+};
+function addExampleV9(kind) {
+  const spec = examplesV9[kind], owner = project();
+  if (!spec || !exampleColumns[kind]) return toast('示例数据不存在。');
+  if (owner.task === 'classification' && owner.classificationModeLocked && spec.mode !== owner.classificationMode) return toast(`项目已锁定为${modeLabelV9(owner.classificationMode)}，请新建项目使用该示例。`);
+  const id = uid('d');
+  state.datasets[id] = { id, projectId: owner.id, name: spec.name, uploadedAt: now(), rows: spec.rows, target: spec.target, positive: spec.mode === 'binary' ? autoPositiveV9({ entries: Object.entries(spec.counts) }) : '', classificationMode: spec.mode, classCounts: spec.counts ? { ...spec.counts } : undefined, missingTargetRows: spec.missing || 0, columns: structuredClone(exampleColumns[kind]), preview: structuredClone(previews[kind]), feature: { missing: 'median', split: '80-20', revision: 1 }, experiments: [] };
+  owner.datasets.push(id); owner.updatedAt = now(); state.datasetId = id;
+  document.querySelector('.modal-backdrop')?.remove(); save(); go('project'); toast('数据集已创建。');
+}
+datasetSourceModal = function () {
+  const owner = project();
+  let examples = owner.task === 'regression'
+    ? [['housing', '住宅价格预测', '1,460 行 · 目标：房价'], ['car', '二手车价格预测', '4,200 行 · 目标：车辆价格']]
+    : owner.classificationMode === 'binary'
+      ? [['churn', '客户流失预测', '7,043 行 · 二分类'], ['loan', '贷款违约预测', '5,000 行 · 二分类']]
+      : owner.classificationMode === 'multiclass'
+        ? [['tier', '客户价值等级预测', '5,200 行 · 4 类'], ['risk', '贷款风险等级预测', '4,800 行 · 3 类']]
+        : [['churn', '客户流失预测', '7,043 行 · 二分类'], ['loan', '贷款违约预测', '5,000 行 · 二分类'], ['tier', '客户价值等级预测', '5,200 行 · 4 类'], ['risk', '贷款风险等级预测', '4,800 行 · 3 类']];
+  modal(`<h2>添加数据集</h2><p>上传 CSV，或选择符合当前${taskLabelV9(owner)}项目的示例。</p><div class="source-tabs"><button class="active" data-source-tab="upload">上传 CSV</button><button data-source-tab="example">示例数据集</button></div><div class="source-panel active" data-source-panel="upload"><div class="upload-box">${button('选择 CSV 文件', 'choose-csv', 'primary')}<span>默认将最后一列作为目标列。</span></div></div><div class="source-panel" data-source-panel="example"><div class="example-dataset-grid">${examples.map(([kind, label, meta]) => `<button class="example-dataset-card" data-action="use-example:${kind}"><b>${label}</b><span>${meta}</span></button>`).join('')}</div></div><div class="modal-actions">${button('取消', 'close-modal')}</div>`);
+  const root = document.querySelector('.modal-backdrop');
+  root.querySelectorAll('[data-action]').forEach(element => { if (element.dataset.action !== 'close-modal') element.onclick = event => { event.stopPropagation(); action(element.dataset.action); }; });
+  root.querySelectorAll('[data-source-tab]').forEach(tab => tab.onclick = () => { root.querySelectorAll('[data-source-tab]').forEach(item => item.classList.toggle('active', item === tab)); root.querySelectorAll('[data-source-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.sourcePanel === tab.dataset.sourceTab)); });
+};
+const datasetSourceModalV9 = datasetSourceModal;
+parseCsv = function (text, name) {
+  const rows = text.replace(/^\uFEFF/, '').trim().split(/\r?\n/).map(line => line.split(','));
+  if (rows.length < 2) return toast('CSV 至少需要表头和一行数据。');
+  const headers = rows[0].map(value => value.trim());
+  if (new Set(headers).size !== headers.length) return toast('CSV 表头不能重复。');
+  const data = rows.slice(1).filter(row => row.some(value => String(value ?? '').trim()));
+  const allCounts = {};
+  const columns = headers.map((header, index) => {
+    const values = data.map(row => String(row[index] ?? '').trim()), nonempty = values.filter(Boolean), counts = {};
+    nonempty.forEach(value => counts[value] = (counts[value] || 0) + 1); allCounts[header] = counts;
+    const numeric = nonempty.filter(value => !Number.isNaN(Number(value))).length, unique = Object.keys(counts).length;
+    const type = numeric / Math.max(1, nonempty.length) > .9 ? 'number' : unique <= Math.max(20, nonempty.length * .1) ? 'category' : 'text';
+    const trainable = type !== 'text' || unique / Math.max(1, nonempty.length) < .5;
+    return { name: header, type, missing: 1 - nonempty.length / Math.max(1, data.length), unique, trainable, reason: trainable ? '' : '自由文本或疑似 ID', variance: type === 'number' ? +(index * .012).toFixed(3) : null, psi: +(0.03 + index * .02).toFixed(2), included: trainable };
+  });
+  const target = headers.at(-1), counts = allCounts[target], complete = Object.values(counts).reduce((sum, value) => sum + value, 0);
+  columns.at(-1).target = true; columns.at(-1).included = false;
+  const id = uid('d'), owner = project();
+  const set = { id, projectId: owner.id, name: name.replace(/\.csv$/i, ''), uploadedAt: now(), rows: data.length, target, targetValueCounts: allCounts, classCounts: counts, missingTargetRows: data.length - complete, columns, preview: data.slice(0, 150), feature: { missing: 'median', split: '80-20', revision: 1 }, experiments: [] };
+  if (owner.task === 'classification') {
+    const check = validateClassesV9(set, owner.classificationModeLocked ? owner.classificationMode : null);
+    if (owner.classificationModeLocked && !check.ok) return toast(check.message);
+    set.classificationMode = check.summary.mode; set.positive = check.summary.mode === 'binary' ? autoPositiveV9(check.summary) : '';
+  }
+  state.datasets[id] = set; owner.datasets.push(id); owner.updatedAt = now(); state.datasetId = id; save(); go('project'); toast('数据集已创建。');
+};
+datasetPage = function () {
+  const set = dataset(), owner = project(), classification = owner.task === 'classification', summary = classification ? classSummaryV9(set) : null;
+  const check = classification ? validateClassesV9(set, owner.classificationModeLocked ? owner.classificationMode : null) : null;
+  const canRetarget = !owner.classificationModeLocked || (owner.datasets.length === 1 && !set.experiments.length);
+  if (summary?.mode === 'binary' && !set.positive) set.positive = autoPositiveV9(summary);
+  const subtype = classification ? `<div class="stat"><span>识别任务</span><b class="small-value">${summary.mode ? modeLabelV9(summary.mode) : '不支持'}</b><small>${owner.classificationModeLocked ? `项目已锁定为${modeLabelV9(owner.classificationMode)}` : '确认后锁定项目'}</small></div>` : '<div class="stat"><span>任务类型</span><b>回归</b></div>';
+  const positive = summary?.mode === 'binary' ? `<div class="stat"><span>正类</span><select data-positive-select>${summary.entries.map(entry => `<option ${entry[0] === set.positive ? 'selected' : ''}>${esc(entry[0])}</option>`).join('')}</select><small>已自动预选，可修改</small></div>` : '';
+  const classPanel = classification ? `<section class="class-check-panel ${check.ok ? 'ok' : 'blocked'}"><div><b>${check.ok ? '分类数据检查通过' : '暂不能进入特征准备'}</b><span>完整目标 ${summary.complete.toLocaleString()} 条 · 空目标 ${summary.missing.toLocaleString()} 条（${(summary.missing / Math.max(1, set.rows) * 100).toFixed(1)}%）</span></div><p>${check.ok ? `${summary.entries.length} 个类别；不平衡比例 1:${summary.ratio.toFixed(1)}。${summary.ratio >= 10 ? ' 严重不平衡，请重点关注 Macro F1。' : summary.ratio >= 3 ? ' 存在不平衡，建议查看每类召回率。' : ''}${summary.missing / set.rows > .1 ? ' 目标缺失超过 10%，缺失行将排除。' : ''}` : esc(check.message)}</p></section>${summary.mode === 'multiclass' ? `<section class="panel class-share-panel"><div class="panel-head"><div><h2>类别比例</h2><p>${summary.entries.length <= 10 ? '3–10 类使用环形图。' : '11–20 类使用横向条形图；报告不显示混淆矩阵。'}</p></div></div>${distributionV9(summary)}</section>` : ''}` : '';
+  const headers = set.columns.map(column => column.name);
+  return shell(`${steps('dataset')}${pageHead('数据检查', `${esc(set.name)} · 确认目标列与任务类型`, button('继续特征准备', 'go-feature', 'primary'))}<div class="stats-grid"><div class="stat"><span>数据量</span><b>${set.rows.toLocaleString()}</b><small>行</small></div><div class="stat"><span>字段数</span><b>${set.columns.length}</b><small>列</small></div><div class="stat"><span>目标列</span><select data-target-select ${canRetarget ? '' : 'disabled'}>${set.columns.map(column => `<option ${column.name === set.target ? 'selected' : ''}>${esc(column.name)}</option>`).join('')}</select></div>${subtype}${positive}</div>${classPanel}<div class="section-title"><h2>字段类型检查</h2><span>日期、自由文本和疑似 ID 不参与训练</span></div><div class="table-card"><table><thead><tr><th>字段</th><th>类型</th><th>缺失率</th><th>唯一值</th><th>训练可用性</th></tr></thead><tbody>${set.columns.map((column, index) => `<tr><td><b>${esc(column.name)}</b>${column.target ? '<small>目标列</small>' : ''}</td><td><select data-column-type="${index}">${['number', 'category', 'date', 'boolean', 'text'].map(type => `<option value="${type}" ${type === column.type ? 'selected' : ''}>${typeLabel(type)}</option>`).join('')}</select></td><td>${(column.missing * 100).toFixed(1)}%</td><td>${column.unique.toLocaleString()}</td><td>${column.target ? '<span class="status target">目标列</span>' : column.trainable ? '<span class="status good">可用于训练</span>' : `<span class="status blocked">不可训练</span><small>${esc(column.reason)}</small>`}</td></tr>`).join('')}</tbody></table></div><div class="section-title"><h2>数据预览</h2><span>最多读取前 150 行</span></div><div class="table-card preview-table"><table><thead><tr>${headers.map(value => `<th>${esc(value)}</th>`).join('')}</tr></thead><tbody>${set.preview.map(row => `<tr>${headers.map((_, index) => `<td>${esc(row[index] ?? '')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+};
+const oldFeaturePageV9 = featurePage;
+featurePage = function () {
+  if (taskKeyV9(project()) !== 'multiclass') return oldFeaturePageV9();
+  const set = dataset(), columns = set.columns.filter(column => !column.target), values = state.featureThresholds;
+  const content = state.featureStep === 0
+    ? `<div class="panel-head"><div><h2>训练集 / 验证集划分</h2><p>多分类采用分层划分，每类需在两侧都保留样本。</p></div><span class="status good">分层划分</span></div><div class="ratio-grid">${['70-30', '75-25', '80-20', '90-10'].map(value => `<button data-split="${value}" class="${set.feature.split === value ? 'selected' : ''}"><b>${value.replace('-', '% / ')}%</b><span>${value === '80-20' ? '推荐' : '预设比例'}</span></button>`).join('')}</div>`
+    : `<div class="panel-head"><div><h2>特征管理</h2><p>不计算 IV 或互信息；低方差只用于训练集 Min-Max 归一化后的数值特征。</p></div>${button('自动筛选', 'auto-filter-v9', 'primary')}</div><div class="threshold-panel v6-thresholds v9-thresholds"><div><b>筛选阈值</b><span>推荐阈值只恢复数字；确定修改后按当前数字筛选。</span></div><label>缺失率上限<input data-threshold-v9="missing" type="number" min="0" max="99" step="1" value="${values.missing ?? multiclassThresholdDefaultsV907.missing}"><em>%</em></label><label>归一化方差下限 <i title="仅对训练集数值特征做 Min-Max 归一化后计算；数值越小表示变化越少。">ⓘ</i><input data-threshold-v9="variance" type="number" min="0" max="0.25" step="0.01" value="${values.variance ?? multiclassThresholdDefaultsV907.variance}"></label><label>PSI 上限 <i title="越小越稳定：低于 0.1 稳定，0.1–0.25 需关注，达到 0.25 表示变化明显。">ⓘ</i><input data-threshold-v9="psi" type="number" min="0.05" max="0.8" step="0.01" value="${values.psi ?? multiclassThresholdDefaultsV907.psi}"></label><div class="threshold-actions">${button('推荐阈值', 'recommend-thresholds-v9')}${button('确定修改', 'confirm-thresholds-v9', 'primary')}</div></div><details class="metric-guide compact-guide"><summary>查看指标说明</summary><div><b>归一化方差</b><span>仅对训练集数值特征计算；低于阈值表示特征变化不足。类别和布尔特征不适用。</span></div><div><b>PSI</b><span>&lt;0.1 稳定；0.1–0.25 需关注；≥0.25 分布变化明显。</span></div></details><div class="table-card"><table><thead><tr><th>纳入</th><th>特征</th><th>类型</th><th>缺失率</th><th>归一化方差</th><th>PSI</th><th>状态</th></tr></thead><tbody>${columns.map((column, index) => `<tr><td><label class="switch"><input type="checkbox" data-feature-toggle="${index}" ${column.included ? 'checked' : ''} ${!column.trainable ? 'disabled' : ''}><span></span></label></td><td><b>${esc(column.name)}</b>${column.reason ? `<small>${esc(column.reason)}</small>` : ''}</td><td>${typeLabel(column.type)}</td><td>${(column.missing * 100).toFixed(1)}%</td><td>${column.type === 'number' ? (column.variance ?? 0).toFixed(3) : '跳过'}</td><td>${column.psi?.toFixed(2) ?? '—'}</td><td>${!column.trainable ? '<span class="status blocked">不可训练</span>' : column.included ? '<span class="status good">已纳入</span>' : '<span class="status muted">已排除</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+  return shell(`${steps('feature')}${pageHead('特征准备', '所有筛选指标仅使用训练集计算。', button('保存并进入模型训练', 'go-experiments', 'primary'))}<div class="feature-layout"><aside class="feature-nav"><button data-feature-step="0" class="${state.featureStep === 0 ? 'active' : ''}"><i>1</i><span>训练集划分</span></button><button data-feature-step="1" class="${state.featureStep === 1 ? 'active' : ''}"><i>2</i><span>特征管理</span></button></aside><div class="feature-panel">${content}</div></div>`);
+};
+const oldEnhanceFeatureV9 = enhanceFeaturePage;
+enhanceFeaturePage = () => taskKeyV9(project()) === 'multiclass' ? undefined : oldEnhanceFeatureV9();
+const oldModelSelectV9 = modelSelectPage;
+modelSelectPage = function () {
+  const content = oldModelSelectV9();
+  return taskKeyV9(project()) === 'multiclass' ? content.replace('<div class="model-grid">', '<div class="notice multiclass-model-note"><b>多分类版本</b><span>保留现有五个模型家族；逻辑回归切换为 Softmax，多树、KNN 与 LGBM 使用对应多分类版本，本轮不增加算法。</span></div><div class="model-grid">') : content;
+};
+
+// V9_CHUNK_2_END
+
+function activateV9Final() {
+datasetSourceModal = datasetSourceModalV9;
+const previousFeatureEnhancerV91 = enhanceFeaturePage;
+enhanceFeaturePage = function () {
+  if (state.page !== 'feature' || taskKeyV9(project()) !== 'multiclass') return previousFeatureEnhancerV91();
+  if (state.featureStep !== 1) return;
+  const panel = app.querySelector('.feature-panel');
+  if (!panel) return;
+  const varianceHeader = [...panel.querySelectorAll('th')].find(cell => cell.textContent.trim() === '归一化方差');
+  if (varianceHeader) varianceHeader.innerHTML = '<span title="仅对训练集数值特征做 Min-Max 归一化后计算；类别、布尔等非数值特征不适用。">归一化方差 ⓘ</span>';
+  panel.querySelectorAll('td').forEach(cell => {
+    if (cell.textContent.trim() === '跳过') cell.innerHTML = '<span class="variance-na" title="该字段不是数值特征，不计算归一化方差；不会因此被排除。">不适用</span>';
+  });
+  if (!panel.querySelector('.correlation-panel')) panel.insertAdjacentHTML('beforeend', correlationPanel());
+};
+const multiThresholdRulesV91 = multiclassThresholdRangesV908;
+function validateMultiThresholdV91(input) {
+  const rule = multiThresholdRulesV91[input?.dataset.thresholdV9];
+  if (!rule || !input) return true;
+  const value = Number(input.value);
+  const valid = input.value.trim() !== '' && Number.isFinite(value) && value >= rule.min && value <= rule.max;
+  input.classList.toggle('range-invalid', !valid);
+  let error = input.parentElement.querySelector('.threshold-range-error');
+  if (!error) {
+    error = document.createElement('small');
+    error.className = 'threshold-range-error';
+    input.insertAdjacentElement('afterend', error);
+  }
+  error.hidden = valid;
+  error.textContent = valid ? '' : `${rule.label}必须在 ${rule.hint} 之间`;
+  return valid;
+}
+metricCatalogV8.multiclass = [
+  { key: 'macroF1', label: 'Macro F1', direction: '越大越好', short: '各类别 F1 等权平均。', full: '每个类别权重相同，适合多分类和类别不平衡场景；本平台默认用它排序。' },
+  { key: 'accuracy', label: '准确率', direction: '越大越好', short: '预测正确样本的比例。', full: '直观反映整体命中率，但需与 Macro F1 和每类召回率一起查看。' },
+  { key: 'weightedF1', label: 'Weighted F1', direction: '越大越好', short: '按类别样本数加权的 F1。', full: '反映总体样本表现，大类别影响更大。' },
+  { key: 'macroPrecision', label: 'Macro Precision', direction: '越大越好', short: '各类别精确率等权平均。', full: '用于观察各类别误报水平。' },
+  { key: 'macroRecall', label: 'Macro Recall', direction: '越大越好', short: '各类别召回率等权平均。', full: '用于观察各类别漏报水平。' },
+  { key: 'logLoss', label: 'Log Loss', direction: '越小越好', short: '衡量完整概率分布质量。', full: '错误且过度自信时惩罚更大，越小越好。' }
+];
+overfitMetricV8 = function (task = taskKeyV9(project())) {
+  if (task === 'multiclass') return { key: 'overfitGap', label: 'Macro F1 差值', direction: '越接近 0 越稳定', short: '训练 Macro F1 减去验证 Macro F1。', full: '辅助观察多分类过拟合风险。' };
+  return task === 'regression'
+    ? { key: 'overfitGap', label: 'RMSE 差值', direction: '越接近 0 越稳定', short: '验证 RMSE 减去训练 RMSE。', full: '辅助观察回归过拟合风险。' }
+    : { key: 'overfitGap', label: 'AUC 差值', direction: '越接近 0 越稳定', short: '训练 AUC 减去验证 AUC。', full: '辅助观察二分类过拟合风险。' };
+};
+selectedMetricsV8 = function (area, task = taskKeyV9(project())) {
+  const store = area === 'library' ? state.libraryVisibleMetrics : state.resultVisibleMetrics;
+  const defaults = task === 'regression' ? ['rmse', 'r2'] : task === 'multiclass' ? ['macroF1', 'accuracy'] : ['auc', 'f1'];
+  const valid = new Set([...taskMetricsV8(task), overfitMetricV8(task)].map(metric => metric.key));
+  const saved = Array.isArray(store[task]) ? store[task].filter(key => valid.has(key)) : [];
+  return store[task] = saved.length ? saved : defaults;
+};
+metricAscendingV8 = key => ['rmse', 'mae', 'logLoss', 'overfitGap'].includes(key);
+overfitGapValueV8 = function (result, task) {
+  const key = task === 'regression' ? 'rmse' : task === 'multiclass' ? 'macroF1' : 'auc';
+  const train = resultValueV6(result, key, 'train'), validation = resultValueV6(result, key, 'validation');
+  const value = train === null || validation === null ? null : +(task === 'regression' ? validation - train : train - validation).toFixed(3);
+  return { value, relative: task === 'regression' && value !== null && train ? +(value / train * 100).toFixed(1) : null, train, validation };
+};
+const oldLibraryMetricV9 = libraryMetricValueV7;
+libraryMetricValueV7 = function (item, result, key, scope = 'validation') {
+  const owner = state.projects.find(entry => entry.id === item.projectId);
+  return taskKeyV9(owner) === 'multiclass' ? (['macroF1', 'accuracy', 'weightedF1', 'macroPrecision', 'macroRecall', 'logLoss', 'gap'].includes(key) ? resultValueV6(result, key, scope) : null) : oldLibraryMetricV9(item, result, key, scope);
+};
+const oldMetricCellV9 = metricValueCellV8;
+metricValueCellV8 = function (item, result, metric, area) {
+  const owner = state.projects.find(entry => entry.id === item.projectId);
+  if (taskKeyV9(owner) !== 'multiclass') return oldMetricCellV9(item, result, metric, area);
+  if (metric.key === 'overfitGap') {
+    const gap = overfitGapValueV8(result, 'multiclass');
+    return `<td class="metric-value-cell overfit-gap-cell"><b>${signedValueV8(gap.value)}</b><small>训练 ${gap.train} / 验证 ${gap.validation}</small></td>`;
+  }
+  const validation = area === 'library' ? libraryMetricValueV7(item, result, metric.key) : resultValueV6(result, metric.key, 'validation');
+  const compare = area === 'library' ? state.libraryCompareTraining : state.resultCompareTraining;
+  const train = area === 'library' ? libraryMetricValueV7(item, result, metric.key, 'train') : resultValueV6(result, metric.key, 'train');
+  return `<td class="metric-value-cell"><b>${validation ?? '—'}</b>${compare ? `<small>训练集 ${train ?? '—'}</small>` : ''}</td>`;
+};
+const oldSortedV9 = sortedExperimentResultsV8;
+sortedExperimentResultsV8 = function (item) {
+  const owner = state.projects.find(entry => entry.id === item.projectId);
+  if (taskKeyV9(owner) !== 'multiclass') return oldSortedV9(item);
+  const key = state.tuningSort || 'macroF1';
+  return [...item.results].sort((a, b) => {
+    const av = key === 'overfitGap' ? overfitGapValueV8(a, 'multiclass').value : resultValueV6(a, key, 'validation');
+    const bv = key === 'overfitGap' ? overfitGapValueV8(b, 'multiclass').value : resultValueV6(b, key, 'validation');
+    return metricAscendingV8(key) ? av - bv : bv - av;
+  });
+};
+const oldEnhanceResultsV9 = enhanceTrainingResultsV8;
+enhanceTrainingResultsV8 = function () {
+  if (state.page !== 'tuning' || taskKeyV9(project()) !== 'multiclass') return oldEnhanceResultsV9();
+  const item = experiment(); if (!item?.results?.length) return;
+  const selected = selectedMetricsV8('result', 'multiclass');
+  if (!selected.includes(state.tuningSort)) state.tuningSort = selected[0];
+  const toolbar = app.querySelector('.tuning-toolbar');
+  if (toolbar) toolbar.innerHTML = `${metricPickerV8('result', 'multiclass')}${compareTrainingToggleV8('result')}<span class="validation-sort-note">默认按验证集 Macro F1 排序</span>`;
+  const metrics = selected.map(key => metricByKeyV8(key, 'multiclass'));
+  const results = (state.showAllResults ? sortedExperimentResultsV8(item) : sortedExperimentResultsV8(item).slice(0, 3));
+  const table = app.querySelector('.result-table'); if (!table) return;
+  table.innerHTML = `<thead><tr><th>保存</th><th>排名</th><th>参数方案</th>${metrics.map(metric => metricSortHeaderV8('result', metric, state.tuningSort)).join('')}<th class="sticky-action-column">操作</th></tr></thead><tbody>${results.map((result, index) => `<tr><td><input type="checkbox" data-save-result="${result.id}" ${(state.tuningSelections[item.id] || []).includes(result.id) ? 'checked' : ''}></td><td><b>#${index + 1}</b></td><td>${schemeCellV8(item, result)}</td>${metrics.map(metric => metricValueCellV8(item, result, metric, 'result')).join('')}<td class="sticky-action-column">${button('查看模型报告', `report-result:${result.id}`, 'primary')}</td></tr>`).join('')}</tbody>`;
+  table.closest('.table-card')?.classList.add('sticky-action-table');
+  table.closest('.table-card')?.insertAdjacentHTML('afterend', metricGuideV8('multiclass', 'v8-result-guide'));
+};
+activeLibraryTaskV8 = function () {
+  const scope = state.libraryDetailScope, exp = scope?.type === 'experiment' ? state.experiments[scope.id] : null, set = scope?.type === 'dataset' ? state.datasets[scope.id] : null;
+  const id = scope?.type === 'project' ? scope.id : set?.projectId || exp?.projectId || state.libraryProjectId;
+  return taskKeyV9(state.projects.find(item => item.id === id));
+};
+sortProjectLibraryRowsV8 = rows => [...rows].sort((a, b) => {
+  const task = taskKeyV9(state.projects.find(item => item.id === a.item.projectId)), key = state.librarySort;
+  const av = key === 'overfitGap' ? overfitGapValueV8(a.result, task).value : libraryMetricValueV7(a.item, a.result, key);
+  const bv = key === 'overfitGap' ? overfitGapValueV8(b.result, task).value : libraryMetricValueV7(b.item, b.result, key);
+  if (av === null) return 1; if (bv === null) return -1;
+  return metricAscendingV8(key) ? av - bv : bv - av;
+});
+const oldLibraryIndexV9 = modelLibraryIndexV8;
+modelLibraryIndexV8 = function (rows) {
+  let content = oldLibraryIndexV9(rows);
+  state.projects.forEach(owner => content = content.replaceAll(`>${esc(owner.name)}</button>`, `><span class="library-task-badge ${owner.classificationMode || owner.task}">${taskLabelV9(owner)}</span>${esc(owner.name)}</button>`));
+  return content;
+};
+const oldLibraryDetailV9 = modelLibraryDetailV8;
+modelLibraryDetailV8 = function (detail) {
+  const multiclass = taskKeyV9(detail.owner) === 'multiclass', oldTask = detail.owner.task;
+  if (multiclass) detail.owner.task = 'multiclass';
+  let content; try { content = oldLibraryDetailV9(detail); } finally { detail.owner.task = oldTask; }
+  return `<div class="library-detail-task"><span class="task-badge ${detail.owner.classificationMode || detail.owner.task}">${taskLabelV9(detail.owner)}</span><span>项目内任务一致，不进行跨项目指标比较。</span></div>${content}`;
+};
+function perClassV9(set, result) {
+  return classSummaryV9(set).entries.map((entry, index) => {
+    const precision = Math.max(.58, result.macroPrecision - .035 + index % 3 * .024), recall = Math.max(.56, result.macroRecall - .045 + (index + 1) % 3 * .028);
+    return { label: entry[0], support: Math.round(entry[1] * Number((set.feature.split || '80-20').split('-')[1]) / 100), precision: +precision.toFixed(3), recall: +recall.toFixed(3), f1: +(2 * precision * recall / (precision + recall)).toFixed(3) };
+  });
+}
+function confusionV9(rows) {
+  return `<div class="table-card multiclass-confusion"><table><thead><tr><th>实际＼预测</th>${rows.map(row => `<th>${esc(row.label)}</th>`).join('')}</tr></thead><tbody>${rows.map((row, ri) => `<tr><th>${esc(row.label)}</th>${rows.map((_, ci) => `<td class="${ri === ci ? 'diagonal' : ''}">${ri === ci ? Math.round(row.support * row.recall) : Math.max(1, Math.round(row.support * (1 - row.recall) / Math.max(1, rows.length - 1)))}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+function multiMetricCardV9(label, value, note) {
+  return `<div class="metric-card"><span>${label}</span><b>${value}</b><small>${note}</small></div>`;
+}
+const oldMetricCardV9 = metricCard;
+metricCard = function (name, value) {
+  const notes = { 'Macro F1': '各类别等权平均', '准确率': '整体预测正确比例', 'Weighted F1': '按类别样本数加权', 'Log Loss': '越小越好' };
+  return notes[name] ? multiMetricCardV9(name, value, notes[name]) : oldMetricCardV9(name, value);
+};
+const oldReportV9 = reportPage;
+reportPage = function () {
+  if (taskKeyV9(project()) !== 'multiclass') return oldReportV9();
+  const item = experiment(), result = item.results.find(row => row.id === item.selected) || item.results[0], set = dataset(), summary = classSummaryV9(set), rows = perClassV9(set, result), features = set.columns.filter(column => column.included && !column.target).slice(0, 10);
+  return shell(`${steps('report')}${pageHead('模型报告', `${esc(project().name)} / ${esc(set.name)} / ${esc(item.name)}`)}<div class="report-hero"><div><span class="status good">✓ 模拟训练成功 · 多分类</span><h2>已完成 ${summary.entries.length} 个类别的联合预测</h2><p>默认关注 Macro F1、准确率和每类表现。</p></div><div class="report-score"><b>${result.macroF1}</b><span>Macro F1 ↑</span></div></div><div class="metrics-grid">${metricCard('Macro F1', result.macroF1)}${metricCard('准确率', result.accuracy)}${metricCard('Weighted F1', result.weightedF1)}${metricCard('Log Loss', result.logLoss)}</div><section class="section-block"><div class="section-title"><h2>各类别表现</h2><span>Support 为验证集样本数</span></div><div class="table-card"><table><thead><tr><th>类别</th><th>Precision</th><th>Recall</th><th>F1</th><th>Support</th></tr></thead><tbody>${rows.map(row => `<tr><td><b>${esc(row.label)}</b></td><td>${row.precision}</td><td>${row.recall}</td><td>${row.f1}</td><td>${row.support}</td></tr>`).join('')}</tbody></table></div></section><section class="section-block"><div class="section-title"><h2>主要混淆方向 Top 3</h2><span>最容易互相误判的类别</span></div><div class="confusion-pairs">${rows.slice(0, 3).map((row, index) => `<div><i>${index + 1}</i><b>${esc(row.label)} → ${esc(rows[(index + 1) % rows.length].label)}</b><span>${31 - index * 7} 个样本</span></div>`).join('')}</div></section>${summary.entries.length <= 10 ? `<section class="section-block"><div class="section-title"><h2>完整混淆矩阵</h2><span>行是实际类别，列是预测类别</span></div>${confusionV9(rows)}</section>` : `<div class="notice"><b>不展示混淆矩阵</b><span>当前有 ${summary.entries.length} 类；10 类以上仅展示每类指标和主要混淆方向。</span></div>`}<section class="section-block"><div class="section-title"><h2>变量重要性 Top ${features.length}</h2><span>不同模型分数不可直接比较</span></div><div class="importance-list">${features.map((feature, index) => `<div><i>${index + 1}</i><b>${esc(feature.name)}</b><span><em style="width:${88 - index * 8}%"></em></span><strong>${(.46 - index * .032).toFixed(3)}</strong></div>`).join('')}</div></section><section class="panel report-data-overview"><h2>数据概览</h2><p>空目标行不参与训练，也不填充。</p><div class="stats-grid"><div class="stat"><span>完整目标</span><b>${summary.complete}</b></div><div class="stat"><span>空目标</span><b>${summary.missing}</b></div><div class="stat"><span>类别数</span><b>${summary.entries.length}</b></div></div></section>${metricGuideV8('multiclass', 'v8-report-guide')}`);
+};
+const reportPageBeforeTenClassRuleV9 = reportPage;
+reportPage = function () {
+  const content = reportPageBeforeTenClassRuleV9();
+  if (taskKeyV9(project()) !== 'multiclass' || classSummaryV9(dataset()).entries.length !== 10) return content;
+  return content.replace(/<section class="section-block"><div class="section-title"><h2>完整混淆矩阵<\/h2>[\s\S]*?<\/section>/, '<div class="notice"><b>不展示混淆矩阵</b><span>当前有 10 类；10 类及以上仅展示每类指标和主要混淆方向。</span></div>');
+};
+function ensureMulticlassReportResultV92() {
+  const item = experiment();
+  if (!item) return null;
+  item.results = Array.isArray(item.results) ? item.results : [];
+  let result = item.results.find(row => row.id === item.selected) || item.results[0];
+  if (!result && item.selected !== null && item.selected !== undefined) {
+    const snapshot = state.savedResultSnapshots?.[`${item.id}:${item.selected}`]?.result;
+    if (snapshot) {
+      result = structuredClone(snapshot);
+      item.results.push(result);
+    }
+  }
+  if (!result) {
+    result = makeMultiResultsV9(1, item)[0];
+    result.id = Number(item.selected) || 1;
+    item.results.push(result);
+  }
+  const validation = result.metrics?.validation || {};
+  const numberOr = (value, fallback) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  result.macroF1 = numberOr(result.macroF1 ?? validation.macroF1 ?? result.f1, .78);
+  result.accuracy = numberOr(result.accuracy ?? validation.accuracy, .82);
+  result.weightedF1 = numberOr(result.weightedF1 ?? validation.weightedF1 ?? result.f1, result.macroF1);
+  result.macroPrecision = numberOr(result.macroPrecision ?? validation.macroPrecision ?? result.precision, result.macroF1);
+  result.macroRecall = numberOr(result.macroRecall ?? validation.macroRecall ?? result.recall, result.macroF1);
+  result.logLoss = numberOr(result.logLoss ?? validation.logLoss, .48);
+  result.gap = numberOr(result.gap ?? result.metrics?.gap, .02);
+  result.metrics ||= {};
+  result.metrics.validation = { ...validation, macroF1: result.macroF1, accuracy: result.accuracy, weightedF1: result.weightedF1, macroPrecision: result.macroPrecision, macroRecall: result.macroRecall, logLoss: result.logLoss };
+  result.metrics.train ||= { ...result.metrics.validation, macroF1: +(result.macroF1 + result.gap).toFixed(3) };
+  result.metrics.gap = result.gap;
+  item.selected = result.id;
+  return result;
+}
+const reportPageCompatibleV92 = reportPage;
+reportPage = function () {
+  if (taskKeyV9(project()) !== 'multiclass') return reportPageCompatibleV92();
+  const item = experiment();
+  const set = dataset();
+  if (!item || !set) return shell(`${pageHead('模型报告', '当前报告上下文已失效')}<div class="empty-state"><h2>无法读取模型报告</h2><p>对应的模型实验或数据集已不存在，请返回模型库重新选择。</p>${button('返回模型库', 'go-models', 'primary')}</div>`);
+  const summary = classSummaryV9(set);
+  if (!summary.mode || !summary.entries.length) return shell(`${pageHead('模型报告', esc(item.name))}<div class="empty-state"><h2>目标类别信息不可用</h2><p>请返回数据检查页重新确认目标列。</p>${button('返回数据检查', 'go-dataset', 'primary')}</div>`);
+  ensureMulticlassReportResultV92();
+  return reportPageCompatibleV92();
+};
+const reportPageBeforeMulticlassLayoutV904 = reportPage;
+reportPage = function () {
+  const content = reportPageBeforeMulticlassLayoutV904();
+  if (taskKeyV9(project()) !== 'multiclass' || !experiment()?.results?.length) return content;
+  const item = experiment();
+  const result = item.results.find(row => row.id === item.selected) || item.results[0];
+  const metrics = [
+    ['macroF1', 'Macro F1', '各类别 F1 等权平均', '越大越好'],
+    ['accuracy', '准确率', '预测正确样本的比例', '越大越好'],
+    ['weightedF1', 'Weighted F1', '按类别样本数加权的 F1', '越大越好'],
+    ['macroPrecision', 'Macro Precision', '各类别精确率等权平均', '越大越好'],
+    ['macroRecall', 'Macro Recall', '各类别召回率等权平均', '越大越好'],
+    ['logLoss', 'Log Loss', '衡量完整类别概率分布质量', '越小越好']
+  ];
+  const validationScope = result.metrics?.validation || result;
+  const trainScope = result.metrics?.train || {};
+  const fallbackGap = Number(result.gap ?? result.metrics?.gap ?? 0);
+  const finiteValue = value => Number.isFinite(Number(value)) ? Number(value) : null;
+  const rows = metrics.map(([key, label, help, direction]) => {
+    const validation = finiteValue(validationScope[key] ?? result[key]);
+    const recordedTrain = finiteValue(trainScope[key]);
+    const train = recordedTrain ?? (validation === null ? null : validation + (key === 'logLoss' ? -fallbackGap : fallbackGap));
+    const difference = train === null || validation === null ? null : Math.abs(train - validation);
+    const display = value => value === null ? '—' : value.toFixed(3);
+    return `<tr><td><b>${label}</b><i class="metric-info" title="${help}">ⓘ</i></td><td>${display(train)}</td><td class="validation-column">${display(validation)}</td><td>${display(difference)}</td><td>${direction}</td></tr>`;
+  }).join('');
+  const overviewTable = `<section class="multiclass-metric-overview"><div class="section-title"><div><h2>指标总览</h2><p>训练集用于拟合，验证集用于模型评估与方案排名。</p></div><span>${esc(modelName(item.type))} · ${esc(dataset().name)}</span></div><div class="table-card multiclass-metric-table"><table><thead><tr><th>指标</th><th>训练集</th><th class="validation-column">验证集</th><th>训练 / 验证差值</th><th>优化方向</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+  const coreMetricsPattern = /<div class="metrics-grid">(?:<div class="metric-card">[\s\S]*?<\/div>){4}<\/div>/;
+  const overviewPattern = /<section class="panel report-data-overview"><h2>数据概览<\/h2><p>([\s\S]*?)<\/p>([\s\S]*?)<\/section>/;
+  const contentWithoutCoreCards = content.replace(coreMetricsPattern, '');
+  const overviewMatch = contentWithoutCoreCards.match(overviewPattern);
+  if (!overviewMatch) return contentWithoutCoreCards.replace('<div class="report-hero">', `${overviewTable}<div class="report-hero">`);
+  const overview = `<section class="multiclass-evaluation multiclass-data-overview"><div class="section-title"><h2>数据概览</h2><span>${overviewMatch[1]}</span></div>${overviewMatch[2]}</section>`;
+  return contentWithoutCoreCards
+    .replace(overviewPattern, '')
+    .replace('<div class="report-hero">', `${overviewTable}<div class="report-hero">`)
+    .replace('<section class="section-block">', `${overview}<section class="section-block">`);
+};
+const enhanceReportMetricsBeforeMulticlassV905 = enhanceReportMetricsV7;
+enhanceReportMetricsV7 = function () {
+  if (taskKeyV9(project()) === 'multiclass') return;
+  return enhanceReportMetricsBeforeMulticlassV905();
+};
+const enhanceClassificationReportBeforeMulticlassV905 = enhanceClassificationReportV7;
+enhanceClassificationReportV7 = function () {
+  if (taskKeyV9(project()) === 'multiclass') return;
+  return enhanceClassificationReportBeforeMulticlassV905();
+};
+const oldEnhanceReportV9 = enhanceReportV8;
+enhanceReportV8 = () => taskKeyV9(project()) === 'multiclass' ? undefined : oldEnhanceReportV9();
+const oldApiPageV9 = apiPage;
+apiPage = function () {
+  if (taskKeyV9(project()) !== 'multiclass') return oldApiPageV9();
+  const item = experiment(), features = dataset().columns.filter(column => column.included && !column.target).slice(0, 3);
+  return shell(`${pageHead('API 接入说明', `${esc(item.name)} · 多分类演示接口`)}<div class="api-warning"><b>演示接口</b><span>返回预测类别、最高置信度和按概率降序排列的完整类别概率数组。</span></div><div class="api-grid"><section class="panel"><h2>接口信息</h2><div class="endpoint"><span>POST</span><code>https://demo.ml-studio.local/v1/predict/${item.id}</code></div><h3>请求 JSON</h3><pre>{ ${features.map((feature, index) => `"${feature.name}": ${feature.type === 'number' ? 18 + index : '"示例值"'}`).join(', ')} }</pre></section><section class="panel api-test"><h2>测试请求</h2>${features.map((feature, index) => `<label>${esc(feature.name)}<input value="${feature.type === 'number' ? 18 + index : '示例值'}"></label>`).join('')}${button('发送模拟请求', 'test-api', 'primary')}<div id="api-response" class="api-response"><span>响应会显示在这里</span></div></section></div>`);
+};
+function apiResponseV9() {
+  if (taskKeyV9(project()) !== 'multiclass') return { prediction: dataset().positive || '是', probability: .78, positiveClass: dataset().positive || '是', threshold: .5, mock: true };
+  const values = classSummaryV9(dataset()).entries.map((entry, index) => ({ label: entry[0], probability: Math.max(.02, .56 - index * .12) })), total = values.reduce((sum, item) => sum + item.probability, 0);
+  const probabilities = values.map(item => ({ ...item, probability: +(item.probability / total).toFixed(3) })).sort((a, b) => b.probability - a.probability);
+  return { prediction: probabilities[0].label, confidence: probabilities[0].probability, probabilities, mock: true };
+}
+const oldActionV9 = action;
+action = function (name) {
+  if (name.startsWith('library-report-v7:')) {
+    const [, experimentId, resultId] = name.split(':');
+    const item = state.experiments[experimentId];
+    const owner = state.projects.find(entry => entry.id === item?.projectId);
+    if (taskKeyV9(owner) === 'multiclass') {
+      if (!item || !state.datasets[item.datasetId]) return toast('模型实验或数据集已不存在，无法打开报告。');
+      state.projectId = item.projectId;
+      state.datasetId = item.datasetId;
+      state.experimentId = item.id;
+      item.selected = Number(resultId);
+      ensureMulticlassReportResultV92();
+      state.page = 'report';
+      save();
+      return render();
+    }
+  }
+  if (name.startsWith('report-result:') && taskKeyV9(project()) === 'multiclass') {
+    const resultId = Number(name.split(':')[1]);
+    const item = experiment();
+    if (!item?.results?.some(result => result.id === resultId)) return toast('未找到对应的训练结果，请重新训练后再查看报告。');
+    item.selected = resultId;
+    ensureMulticlassReportResultV92();
+    state.page = 'report';
+    save();
+    return render();
+  }
+  if (name.startsWith('use-example:')) return addExampleV9(name.split(':')[1]);
+  if (name === 'go-feature-v6' && project().task === 'classification') {
+    const owner = project(), set = dataset(), check = validateClassesV9(set, owner.classificationModeLocked ? owner.classificationMode : null);
+    if (!check.ok) return toast(check.message);
+    set.classificationMode = check.summary.mode; if (check.summary.mode === 'binary') set.positive ||= autoPositiveV9(check.summary);
+    if (!owner.classificationModeLocked) {
+      state.pendingLockV9 = { projectId: owner.id, datasetId: set.id, mode: check.summary.mode };
+      modal(`<h2>确认分类任务类型</h2><p>目标列“${esc(set.target)}”识别出 ${check.summary.entries.length} 个类别，项目将锁定为<b>${modeLabelV9(check.summary.mode)}</b>。</p><div class="lock-summary">${check.summary.entries.map(entry => `<span><b>${esc(entry[0])}</b>${entry[1]} 条</span>`).join('')}</div>${check.summary.missing / set.rows > .1 ? '<div class="notice warning">目标缺失超过 10%，缺失行会自动排除。</div>' : ''}${check.summary.ratio >= 3 ? `<div class="notice warning">类别不平衡 1:${check.summary.ratio.toFixed(1)}，不会自动重采样。</div>` : ''}<small>任务不同请新建项目。</small><div class="modal-actions">${button('取消', 'close-modal')}${button(`确认锁定为${modeLabelV9(check.summary.mode)}`, 'confirm-lock-v9', 'primary')}</div>`);
+      document.querySelector('[data-action="confirm-lock-v9"]').onclick = event => { event.stopPropagation(); action('confirm-lock-v9'); }; return;
+    }
+    state.featureStep = 0; save(); return go('feature');
+  }
+  if (name === 'confirm-lock-v9') {
+    const pending = state.pendingLockV9, owner = state.projects.find(item => item.id === pending?.projectId), set = state.datasets[pending?.datasetId];
+    if (!owner || !set) return toast('数据集已不存在。');
+    Object.assign(owner, { classificationMode: pending.mode, classificationModeLocked: true }); set.classificationMode = pending.mode; state.pendingLockV9 = null; state.featureStep = 0;
+    document.querySelector('.modal-backdrop')?.remove(); save(); return go('feature');
+  }
+  if (name === 'recommend-thresholds-v9') {
+    Object.entries(multiclassThresholdDefaultsV907).forEach(([key, value]) => {
+      document.querySelector(`[data-threshold-v9="${key}"]`).value = value;
+    });
+    document.querySelectorAll('[data-threshold-v9]').forEach(validateMultiThresholdV91);
+    return toast('已恢复推荐阈值。');
+  }
+  if (['auto-filter-v9', 'confirm-thresholds-v9'].includes(name)) {
+    if (name === 'confirm-thresholds-v9' && ![...document.querySelectorAll('[data-threshold-v9]')].every(validateMultiThresholdV91)) return toast('请先修正标红的筛选阈值。');
+    const values = name === 'auto-filter-v9' ? { ...multiclassThresholdDefaultsV907 } : Object.fromEntries([...document.querySelectorAll('[data-threshold-v9]')].map(input => [input.dataset.thresholdV9, Number(input.value)]));
+    const invalidRule = Object.entries(multiclassThresholdRangesV908).find(([key, range]) => !Number.isFinite(values[key]) || values[key] < range.min || values[key] > range.max);
+    if (invalidRule) return toast(`${invalidRule[1].label}必须在 ${invalidRule[1].hint} 之间。`);
+    const set = dataset();
+    const eligible = set.columns.filter(column => !column.target && column.trainable);
+    const decisions = eligible.map(column => ({ column, included: column.missing * 100 <= values.missing && (column.type !== 'number' || (column.variance ?? 0) >= values.variance) && (column.psi ?? 0) <= values.psi }));
+    const included = decisions.filter(decision => decision.included).length;
+    if (!included) return toast('当前阈值会排除全部特征。');
+    Object.assign(state.featureThresholds, values);
+    decisions.forEach(decision => { decision.column.included = decision.included; });
+    set.feature.revision++; markDatasetStale(set); save(); render(); return toast(`已纳入 ${included} 个，排除 ${eligible.length - included} 个。`);
+  }
+  if (name === 'test-api') { const response = document.querySelector('#api-response'); if (response) response.innerHTML = `<b>200 OK</b><pre>${esc(JSON.stringify(apiResponseV9(), null, 2))}</pre>`; return; }
+  if (name.startsWith('restore-v8-metrics:') && (name.split(':')[1] === 'library' ? activeLibraryTaskV8() : taskKeyV9(project())) === 'multiclass') {
+    const area = name.split(':')[1], store = area === 'library' ? state.libraryVisibleMetrics : state.resultVisibleMetrics; store.multiclass = ['macroF1', 'accuracy'];
+    if (area === 'library') state.librarySort = 'macroF1'; else state.tuningSort = 'macroF1'; save(); return render();
+  }
+  if (name.startsWith('open-library-scope-v8:')) { const result = oldActionV9(name); if (activeLibraryTaskV8() === 'multiclass') { state.librarySort = 'macroF1'; save(); render(); } return result; }
+  if (name === 'project-models' && taskKeyV9(project()) === 'multiclass') { const result = oldActionV9(name); state.librarySort = 'macroF1'; save(); render(); return result; }
+  if (name.startsWith('delete-entity:dataset:')) {
+    const owner = state.projects.find(item => item.id === state.datasets[name.split(':')[2]]?.projectId), result = oldActionV9(name);
+    if (owner && !owner.datasets.length && owner.task === 'classification') { owner.classificationMode = null; owner.classificationModeLocked = false; save(); render(); }
+    return result;
+  }
+  return oldActionV9(name);
+};
+const oldBindV9 = bind;
+bind = function () {
+  oldBindV9();
+  app.querySelectorAll('[data-threshold-v9]').forEach(input => {
+    validateMultiThresholdV91(input);
+    input.addEventListener('input', () => validateMultiThresholdV91(input));
+    input.addEventListener('blur', () => validateMultiThresholdV91(input));
+  });
+  const target = document.querySelector('[data-target-select]');
+  if (project()?.task === 'classification' && target && !target.disabled) {
+    const clean = target.cloneNode(true); target.replaceWith(clean);
+    clean.onchange = event => {
+      const set = dataset(); set.columns.forEach(column => { column.target = column.name === event.target.value; if (column.target) column.included = false; }); set.target = event.target.value;
+      const summary = classSummaryV9(set, set.target); set.classCounts = Object.fromEntries(summary.entries); set.missingTargetRows = Math.max(0, set.rows - summary.complete); set.classificationMode = summary.mode; set.positive = summary.mode === 'binary' ? autoPositiveV9(summary) : '';
+      set.feature.revision++; markDatasetStale(set); save(); render();
+    };
+  }
+};
+save();
+render();
+}
+
+// V9_CHUNK_3_END
 
 
 // ============================================================================
@@ -2078,4 +2673,5 @@ bind = function () {
 
 save();
 render();
+activateV9Final();
 
