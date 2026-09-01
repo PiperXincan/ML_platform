@@ -455,7 +455,7 @@ function deleteModal(type, id) {
   modal(`<h2>删除${label[0]}</h2><p>删除后无法恢复，${label[1]}也会同时删除。</p><div class="modal-actions">${button('取消', 'close-modal')}${button('确认删除', `delete-entity:${type}:${id}`, 'primary')}</div>`); const confirm = document.querySelector('[data-action^="delete-entity:"]'); confirm.onclick = event => { event.stopPropagation(); action(confirm.dataset.action); };
 }
 
-function removeExperiments(ids) { ids.forEach(id => { delete state.experiments[id]; delete state.savedResults[id]; delete state.tuningSelections[id]; }); state.apiConfigs = state.apiConfigs.filter(config => !ids.includes(config.experimentId)); }
+function removeExperiments(ids) { ids.forEach(id => { delete state.experiments[id]; delete state.savedResults[id]; delete state.tuningSelections[id]; }); state.apiConfigs = state.apiConfigs.filter(config => !ids.includes(config.experimentId)); Object.keys(state.savedReports || {}).forEach(key => { if (ids.includes(state.savedReports[key]?.experimentId)) delete state.savedReports[key]; }); }
 
 startTraining = function () {
   const item = experiment(); item.status = 'training'; state.training = { progress: 8, label: '正在校验配置' }; render(); const stages = [[28, '正在准备数据'], [52, item.tuning === 'auto' ? '正在快速自动调参' : '正在训练模型'], [78, '正在计算指标'], [100, '正在生成结果']]; let index = 0;
@@ -2524,7 +2524,7 @@ action = function (name) {
   }
   if (name.startsWith('restore-v8-metrics:')) {
     const area = name.split(':')[1];
-    const task = area === 'library' ? activeLibraryTaskV8() : project().task;
+    const task = area === 'library' ? activeLibraryTaskV8() : taskKeyV9(project());
     const defaults = task === 'regression' ? ['rmse', 'r2'] : ['auc', 'f1'];
     const store = area === 'library' ? state.libraryVisibleMetrics : state.resultVisibleMetrics;
     store[task] = defaults;
@@ -2680,7 +2680,7 @@ bind = function () {
   app.querySelectorAll('[data-save-result]').forEach(checkbox => checkbox.onchange = () => { const item = experiment(); const selected = new Set(state.tuningSelections[item.id] || []); checkbox.checked ? selected.add(+checkbox.dataset.saveResult) : selected.delete(+checkbox.dataset.saveResult); state.tuningSelections[item.id] = [...selected]; state.tuningSelectionTouched[item.id] = true; save(); enhanceSaveButton(); });
   app.querySelectorAll('[data-v8-metric-area]').forEach(checkbox => checkbox.onchange = () => {
     const area = checkbox.dataset.v8MetricArea;
-    const task = area === 'library' ? activeLibraryTaskV8() : project().task;
+    const task = area === 'library' ? activeLibraryTaskV8() : taskKeyV9(project());
     const selected = new Set(selectedMetricsV8(area, task));
     checkbox.checked ? selected.add(checkbox.dataset.v8MetricKey) : selected.delete(checkbox.dataset.v8MetricKey);
     if (!selected.size) { checkbox.checked = true; return toast('请至少保留一个显示指标。'); }
@@ -2941,6 +2941,83 @@ bind = function () {
     save(); render();
     return toast(`目标列已修改为“${nextTarget}”，相关特征与实验配置已重置。`);
   };
+};
+
+save();
+render();
+
+// ============================================================================
+// V9.0.10 — front-end model report saving demo
+// ============================================================================
+state.savedReports = recordV7(state.savedReports);
+
+function currentReportContextV910() {
+  const owner = project(), set = dataset(), item = experiment();
+  if (!owner || !set || !item) return null;
+  const result = (item.results || []).find(row => row.id === item.selected) || (item.results || [])[0];
+  if (!result) return null;
+  return { owner, set, item, result, key: `${item.id}:${result.id}` };
+}
+
+function defaultReportNameV910(context) {
+  return `${context.owner.name}_${context.set.name}_${context.item.name}_${schemeLabelV8(context.item, context.result)}`.replace(/[\\/:*?"<>|]+/g, '-');
+}
+
+function openSaveReportModalV910() {
+  const context = currentReportContextV910();
+  if (!context) return toast('当前模型报告不可用。');
+  const existing = state.savedReports[context.key];
+  modal(`<h2>${existing ? '更新保存模型报告' : '保存模型报告'}</h2><p>保存当前参数方案对应的模型报告状态，用于前端流程演示。</p><label class="field"><span>报告名称</span><input id="report-name-v910" value="${esc(existing?.name || defaultReportNameV910(context))}" maxlength="120"></label><label class="field"><span>报告格式</span><select id="report-format-v910"><option value="pdf">PDF 报告（前端演示）</option></select></label><div class="notice"><b>演示说明</b><span>当前版本只在浏览器本地记录报告名称、保存时间和报告快照，不生成真实文件，也不上传服务器。</span></div><div class="modal-actions">${button('取消', 'close-modal')}${button(existing ? '确认更新' : '确认保存', 'confirm-save-report-v910', 'primary')}</div>`);
+  bindDynamicModalV909();
+}
+
+function enhanceReportSaveV910() {
+  if (state.page !== 'report') return;
+  const context = currentReportContextV910();
+  const actions = app.querySelector('.page-head .head-actions');
+  if (!context || !actions || actions.querySelector('[data-action="save-report-v910"]')) return;
+  const saved = state.savedReports[context.key];
+  actions.insertAdjacentHTML('beforeend', `${saved ? `<span class="report-save-status"><b>已保存</b><small>${esc(saved.savedAt)}</small></span>` : ''}${button(saved ? '更新保存' : '保存模型报告', 'save-report-v910', saved ? '' : 'primary')}`);
+}
+
+const previousActionV910 = action;
+action = function (name) {
+  if (name === 'save-report-v910') return openSaveReportModalV910();
+  if (name === 'confirm-save-report-v910') {
+    const context = currentReportContextV910();
+    const reportName = document.querySelector('#report-name-v910')?.value.trim();
+    if (!context) return toast('当前模型报告不可用。');
+    if (!reportName) return toast('请输入报告名称。');
+    const savedAt = now();
+    state.savedReports[context.key] = {
+      id: state.savedReports[context.key]?.id || uid('report'),
+      key: context.key,
+      name: reportName,
+      format: 'pdf',
+      projectId: context.owner.id,
+      projectName: context.owner.name,
+      datasetId: context.set.id,
+      datasetName: context.set.name,
+      experimentId: context.item.id,
+      experimentName: context.item.name,
+      resultId: context.result.id,
+      scheme: schemeLabelV8(context.item, context.result),
+      task: taskKeyV9(context.owner),
+      savedAt,
+      resultSnapshot: cloneV7(context.result)
+    };
+    document.querySelector('.modal-backdrop')?.remove();
+    save(); render();
+    return toast('模型报告已保存（前端演示）。');
+  }
+  return previousActionV910(name);
+};
+
+const previousBindV910 = bind;
+bind = function () {
+  previousBindV910();
+  enhanceReportSaveV910();
+  app.querySelectorAll('[data-action]').forEach(element => element.onclick = event => { event.stopPropagation(); action(element.dataset.action); });
 };
 
 save();
