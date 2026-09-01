@@ -157,4 +157,40 @@ assert.equal(snapshot.resultMode, 'demo');
 assert.equal(snapshot.target, '是否流失');
 assert.ok(Array.isArray(snapshot.features));
 
-console.log('ML Studio V9.1.1 smoke checks passed.');
+evaluate(`state.projects.push({id:'p-forecast',name:'销量预测测试',task:'forecasting',createdAt:now(),updatedAt:now(),datasets:[]}); state.projectId='p-forecast'; createForecastExampleV10()`);
+const forecastDatasetId = evaluate(`state.projects.find(item=>item.id==='p-forecast').datasets[0]`);
+assert.ok(forecastDatasetId);
+assert.equal(evaluate(`state.datasets['${forecastDatasetId}'].timeSummary.validPoints`), 365);
+assert.equal(evaluate(`state.datasets['${forecastDatasetId}'].timeSummary.blockers.length`), 0);
+assert.equal(evaluate(`state.datasets['${forecastDatasetId}'].frequency`), 'day');
+assert.match(evaluate(`datasetPage()`), /时序有效性检查/);
+assert.match(evaluate(`featurePage()`), /时间与回测/);
+
+evaluate(`action('add-forecast-model-v10:forecast_lgbm')`);
+const forecastExperimentId = evaluate(`state.experimentId`);
+assert.ok(forecastExperimentId);
+evaluate(`state.experiments['${forecastExperimentId}'].results=makeForecastResultsV10(state.experiments['${forecastExperimentId}']); state.experiments['${forecastExperimentId}'].selected=state.experiments['${forecastExperimentId}'].results[0].id; state.experiments['${forecastExperimentId}'].status='completed'; state.tuningSelections['${forecastExperimentId}']=[state.experiments['${forecastExperimentId}'].selected]`);
+assert.equal(evaluate(`state.experiments['${forecastExperimentId}'].results[0].backtests.length`), 3);
+assert.equal(evaluate(`state.experiments['${forecastExperimentId}'].results[0].forecast.length`), 7);
+assert.match(evaluate(`tuningPage()`), /平均 MAE/);
+assert.match(evaluate(`reportPage()`), /95% 预测区间/);
+assert.match(evaluate(`reportPage()`), /<svg/);
+evaluate(`state.datasets['${forecastDatasetId}'].forecastConfig.horizon=14`);
+assert.match(evaluate(`reportPage()`), /未来 7 期/);
+evaluate(`state.datasets['${forecastDatasetId}'].forecastConfig.horizon=7`);
+
+evaluate(`state.page='tuning'; action('save-library-results')`);
+assert.equal(evaluate('state.page'), 'models');
+assert.equal(location.hash, `#/models/experiment/${forecastExperimentId}`);
+assert.equal(evaluate(`state.savedResultSnapshots['${forecastExperimentId}:1'].trainingSnapshot.task`), 'forecasting');
+assert.equal(evaluate(`state.savedResultSnapshots['${forecastExperimentId}:1'].trainingSnapshot.forecastConfig.horizon`), 7);
+assert.match(evaluate(`modelsPage()`), /预测范围/);
+evaluate(`action('library-report-v7:${forecastExperimentId}:1')`);
+assert.equal(evaluate('state.page'), 'report');
+assert.equal(evaluate(`state.reportReturnContextV911.page`), 'models');
+evaluate(`action('return-report-source-v911')`);
+assert.equal(evaluate('state.page'), 'models');
+evaluate(`state.page='api'`);
+assert.match(evaluate(`apiPage()`), /"horizon": 7/);
+
+console.log('ML Studio V10.0.0 smoke checks passed.');
