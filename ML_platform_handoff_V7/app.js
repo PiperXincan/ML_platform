@@ -95,9 +95,9 @@ function sidebar() {
 }
 function projectPopover(item) {
   const sets = item.datasets.map(id => state.datasets[id]).filter(Boolean); const selected = sets[0];
-  return `<div class="popover-tabs"><button data-pop-tab="overview" class="active">项目概览</button><button data-pop-tab="metrics">数据集指标</button><button data-pop-tab="preview">数据预览</button></div><div class="popover-panel active" data-pop-panel="overview"><strong>${esc(item.name)}</strong><p>${taskLabel(item.task)} · 创建于 ${item.createdAt}</p><div class="popover-stats"><span><b>${sets.length}</b> 数据集</span><span><b>${sets.reduce((sum, set) => sum + set.experiments.length, 0)}</b> 模型实验</span></div></div><div class="popover-panel" data-pop-panel="metrics">${sets.length ? sets.map(set => `<div class="popover-dataset"><b>${esc(set.name)}</b><span>${set.rows.toLocaleString()} 行 · ${set.columns.length} 列 · 目标：${set.target}</span></div>`).join('') : '<p>还没有数据集</p>'}</div><div class="popover-panel" data-pop-panel="preview">${selected ? `<small>当前仅预览前 150 行 · 第 1 页 / 共 8 页</small><div class="mini-preview">${selected.preview.slice(0, 3).map(row => `<div>${row.slice(0, 3).map(value => `<span>${esc(value)}</span>`).join('')}</div>`).join('')}</div>` : '<p>还没有可预览的数据</p>'}</div>`;
+  return `<div class="popover-tabs"><button data-pop-tab="overview" class="active">项目概览</button><button data-pop-tab="metrics">数据集指标</button><button data-pop-tab="preview">数据预览</button></div><div class="popover-panel active" data-pop-panel="overview"><strong>${esc(item.name)}</strong><p>${taskLabel(item.task)} · 创建于 ${esc(item.createdAt)}</p><div class="popover-stats"><span><b>${sets.length}</b> 数据集</span><span><b>${sets.reduce((sum, set) => sum + set.experiments.length, 0)}</b> 模型实验</span></div></div><div class="popover-panel" data-pop-panel="metrics">${sets.length ? sets.map(set => `<div class="popover-dataset"><b>${esc(set.name)}</b><span>${set.rows.toLocaleString()} 行 · ${set.columns.length} 列 · 目标：${esc(set.target)}</span></div>`).join('') : '<p>还没有数据集</p>'}</div><div class="popover-panel" data-pop-panel="preview">${selected ? `<small>当前仅预览前 150 行 · 第 1 页 / 共 8 页</small><div class="mini-preview">${selected.preview.slice(0, 3).map(row => `<div>${row.slice(0, 3).map(value => `<span>${esc(value)}</span>`).join('')}</div>`).join('')}</div>` : '<p>还没有可预览的数据</p>'}</div>`;
 }
-function shell(content) { return `<div class="app-shell">${sidebar()}<main><header class="topbar"><div><span>项目</span><b>${esc(project()?.name || '未选择项目')}</b></div><div class="top-actions"><span class="mock">模拟结果</span><span class="saved">● 已本地保存</span><span class="avatar">ML</span></div></header><section class="page">${content}</section></main></div><div id="toast" class="toast"></div>`; }
+function shell(content) { return `<div class="app-shell">${sidebar()}<main><header class="topbar"><div><span>项目</span><b>${esc(project()?.name || '未选择项目')}</b></div><div class="top-actions"><span class="mock">模拟结果</span><span class="avatar">ML</span></div></header><section class="page">${content}</section></main></div><div id="toast" class="toast"></div>`; }
 function pageHead(title, subtitle, actions = '') { return `<div class="page-head"><div><h1>${title}</h1><p>${subtitle}</p></div><div class="head-actions">${actions}</div></div>`; }
 function homePage() {
   return shell(`${pageHead('零代码训练你的机器学习模型', '从项目开始，按固定步骤完成数据检查、特征工程、训练和解释。', button('＋ 创建项目', 'new-project', 'primary'))}<div class="hero-grid"><div class="hero-card"><span class="eyebrow">固定流程 · 更适合初学者</span><h2>项目、数据集和模型实验<br>都在一个平台中管理</h2><p>不再使用自由画布。系统只展示当前任务需要的模型和配置。</p><div class="flow-strip"><span>1 数据检查</span><i>→</i><span>2 特征工程</span><i>→</i><span>3 模型实验</span><i>→</i><span>4 查看结果</span></div></div><div class="hero-side"><b>当前工作区</b><strong>${state.projects.length}</strong><span>个项目</span><strong>${Object.keys(state.experiments).length}</strong><span>个模型实验</span></div></div><div class="section-title"><h2>最近项目</h2><span>所有数据只保存在当前浏览器</span></div><div class="card-grid">${state.projects.map(projectCard).join('')}</div>`);
@@ -201,7 +201,7 @@ function bind() {
   document.querySelector('[data-experiment-name]')?.addEventListener('change', event => { experiment().name = event.target.value.trim() || experiment().name; save(); render(); });
 }
 function render() { const pages = { home: homePage, projects: projectsPage, project: projectPage, dataset: datasetPage, feature: featurePage, experiments: experimentsPage, 'model-select': modelSelectPage, experiment: experimentPage, tuning: tuningPage, report: reportPage, models: modelsPage, api: apiPage }; app.innerHTML = (pages[state.page] || homePage)(); bind(); }
-fileInput.addEventListener('change', event => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => parseCsv(String(reader.result), file.name); reader.readAsText(file, 'utf-8'); event.target.value = ''; });
+fileInput.addEventListener('change', event => { const file = event.target.files[0]; if (!file) return; if (file.size > 20 * 1024 * 1024) { event.target.value = ''; return toast('CSV 文件不能超过 20MB。', 'warning'); } const reader = new FileReader(); reader.onload = () => { const text = String(reader.result); if (text.includes('\uFFFD')) return toast('文件可能不是 UTF-8 编码，请转换编码后重试。', 'error'); parseCsv(text, file.name); }; reader.onerror = () => toast('CSV 文件读取失败，请重新选择。', 'error'); reader.readAsText(file, 'utf-8'); event.target.value = ''; });
 render();
 
 
@@ -223,7 +223,7 @@ sidebar = function () {
 
 function datasetHover(set) {
   const numeric = set.columns.filter(column => column.type === 'number' && !column.target).slice(0, 2);
-  return `<div class="dataset-hover"><div class="dataset-hover-head"><b>${esc(set.name)}</b><button data-pin-dataset="${set.id}" aria-label="固定弹窗">⌖ 固定</button></div><div class="dataset-hover-tabs"><button class="active" data-dataset-hover-tab="summary">数据概览</button><button data-dataset-hover-tab="preview">数据预览</button></div><div class="dataset-hover-panel active" data-dataset-hover-panel="summary"><div class="hover-stats"><span><b>${set.rows.toLocaleString()}</b>行</span><span><b>${set.columns.length}</b>列</span><span><b>${set.target}</b>目标列</span><span><b>${set.columns.reduce((sum, column) => sum + Math.round(column.missing * set.rows), 0)}</b>缺失值</span></div>${numeric.map((column, index) => `<div class="summary-row"><b>${esc(column.name)}</b><span>均值 ${(32.4 + index * 11.7).toFixed(1)}</span><span>中位数 ${(30.1 + index * 10.5).toFixed(1)}</span><span>最小 ${index}</span><span>最大 ${88 + index * 21}</span></div>`).join('')}<small>统计指标基于完整数据集，表格仅预览前 150 行。</small></div><div class="dataset-hover-panel" data-dataset-hover-panel="preview"><div class="mini-preview">${set.preview.slice(0, 5).map(row => `<div>${row.slice(0, 4).map(value => `<span>${esc(value)}</span>`).join('')}</div>`).join('')}</div><div class="hover-pagination"><button disabled>上一页</button><span>1 / 8</span><button>下一页</button></div><small>最多读取前 150 行，每页 20 行。</small></div></div>`;
+  return `<div class="dataset-hover"><div class="dataset-hover-head"><b>${esc(set.name)}</b><button data-pin-dataset="${esc(set.id)}" aria-label="固定弹窗">⌖ 固定</button></div><div class="dataset-hover-tabs"><button class="active" data-dataset-hover-tab="summary">数据概览</button><button data-dataset-hover-tab="preview">数据预览</button></div><div class="dataset-hover-panel active" data-dataset-hover-panel="summary"><div class="hover-stats"><span><b>${set.rows.toLocaleString()}</b>行</span><span><b>${set.columns.length}</b>列</span><span><b>${esc(set.target)}</b>目标列</span><span><b>${set.columns.reduce((sum, column) => sum + Math.round(column.missing * set.rows), 0)}</b>缺失值</span></div>${numeric.map((column, index) => `<div class="summary-row"><b>${esc(column.name)}</b><span>均值 ${(32.4 + index * 11.7).toFixed(1)}</span><span>中位数 ${(30.1 + index * 10.5).toFixed(1)}</span><span>最小 ${index}</span><span>最大 ${88 + index * 21}</span></div>`).join('')}<small>统计指标基于完整数据集，表格仅预览前 150 行。</small></div><div class="dataset-hover-panel" data-dataset-hover-panel="preview"><div class="mini-preview">${set.preview.slice(0, 5).map(row => `<div>${row.slice(0, 4).map(value => `<span>${esc(value)}</span>`).join('')}</div>`).join('')}</div><div class="hover-pagination"><button disabled>上一页</button><span>1 / 8</span><button>下一页</button></div><small>最多读取前 150 行，每页 20 行。</small></div></div>`;
 }
 
 projectPage = function () {
@@ -1116,7 +1116,6 @@ action = function (name) {
     const saved = new Set(state.savedResults[item.id] || []);
     const additions = selected.filter(resultId => !saved.has(resultId));
     const duplicateCount = selected.length - additions.length;
-    if (!additions.length) return toast('该结果已保存到模型库。');
     additions.forEach(resultId => {
       saved.add(resultId);
       const key = `${item.id}:${resultId}`; const createdAt = now(); const result = item.results.find(row => row.id === resultId);
@@ -1179,6 +1178,105 @@ render = function () {
 
 save();
 render();
+
+// ============================================================================
+// V9.1.0 — consolidated product hardening and navigation
+// ============================================================================
+const DEMO_RESULT_SOURCE_V910 = 'demo-generated';
+
+function parseCsvRowsV910(text) {
+  const source = String(text || '').replace(/^\uFEFF/, '');
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (quoted) {
+      if (char === '"' && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"' && field === '') {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(field);
+      field = '';
+    } else if (char === '\n' || char === '\r') {
+      if (char === '\r' && source[index + 1] === '\n') index += 1;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += char;
+    }
+  }
+  if (quoted) throw new Error('CSV 中存在未闭合的引号。');
+  if (field !== '' || row.length) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows.filter(values => values.some(value => String(value).trim() !== ''));
+}
+
+function buildCsvDatasetV910(rows, name) {
+  if (rows.length < 2) throw new Error('CSV 至少需要表头和一行数据。');
+  const headers = rows[0].map(value => String(value).trim());
+  if (headers.some(value => !value)) throw new Error('CSV 表头不能为空。');
+  const normalized = headers.map(value => value.toLocaleLowerCase());
+  if (new Set(normalized).size !== normalized.length) throw new Error('CSV 表头不能重复。');
+  const malformedIndex = rows.slice(1).findIndex(row => row.length !== headers.length);
+  if (malformedIndex >= 0) throw new Error(`第 ${malformedIndex + 2} 行有 ${rows[malformedIndex + 1].length} 列，应为 ${headers.length} 列。`);
+  const data = rows.slice(1).map(row => row.map(value => String(value).trim()));
+  const allCounts = Object.create(null);
+  const columns = headers.map((header, index) => {
+    const values = data.map(row => row[index]);
+    const nonempty = values.filter(Boolean);
+    const counts = Object.create(null);
+    nonempty.forEach(value => {
+      if (Object.prototype.hasOwnProperty.call(counts, value)) counts[value] += 1;
+      else if (Object.keys(counts).length < 21) counts[value] = 1;
+    });
+    allCounts[header] = counts;
+    const numericCount = nonempty.filter(value => Number.isFinite(Number(value))).length;
+    const unique = new Set(nonempty).size;
+    const type = numericCount / Math.max(1, nonempty.length) > .9 ? 'number' : unique <= Math.max(20, nonempty.length * .1) ? 'category' : 'text';
+    const trainable = type !== 'text' || unique / Math.max(1, nonempty.length) < .5;
+    return { name: header, type, missing: 1 - nonempty.length / Math.max(1, data.length), unique, trainable, reason: trainable ? '' : '自由文本或疑似 ID', variance: type === 'number' ? +(index * .012).toFixed(3) : null, psi: +(0.03 + index * .02).toFixed(2), included: trainable };
+  });
+  const owner = project();
+  const target = headers[headers.length - 1];
+  const targetColumn = columns[columns.length - 1];
+  if (owner.task === 'regression' && targetColumn.type !== 'number') throw new Error('回归任务的目标列必须是数值型；请调整 CSV 最后一列后重试。');
+  targetColumn.target = true;
+  targetColumn.included = false;
+  const counts = allCounts[target];
+  const complete = data.reduce((sum, row) => sum + (row[headers.length - 1] ? 1 : 0), 0);
+  const id = uid('d');
+  const set = { id, projectId: owner.id, name: String(name || '数据集').replace(/\.csv$/i, ''), uploadedAt: now(), rows: data.length, target, targetValueCounts: allCounts, classCounts: counts, missingTargetRows: data.length - complete, columns, preview: data.slice(0, 150), previewLimit: 150, rawStored: false, dataSource: 'uploaded', feature: { missing: 'median', split: '80-20', revision: 1 }, experiments: [] };
+  if (owner.task === 'classification') {
+    const check = validateClassesV9(set, owner.classificationModeLocked ? owner.classificationMode : null);
+    if (!check.ok) throw new Error(check.message);
+    set.classificationMode = check.summary.mode;
+    set.positive = check.summary.mode === 'binary' ? autoPositiveV9(check.summary) : '';
+  }
+  return set;
+}
+
+function ensureDemoResultMetaV910(result, generatedAt = now()) {
+  if (!result || typeof result !== 'object') return result;
+  result.resultMode ||= 'demo';
+  result.metricSource ||= DEMO_RESULT_SOURCE_V910;
+  result.generatedAt ||= generatedAt;
+  return result;
+}
 
 // ============================================================================
 // V9.0.0 — 分类项目、二分类 / 多分类锁定与多分类展示
@@ -1656,7 +1754,7 @@ const oldApiPageV9 = apiPage;
 apiPage = function () {
   if (taskKeyV9(project()) !== 'multiclass') return oldApiPageV9();
   const item = experiment(), features = dataset().columns.filter(column => column.included && !column.target).slice(0, 3);
-  return shell(`${pageHead('API 接入说明', `${esc(item.name)} · 多分类演示接口`)}<div class="api-warning"><b>演示接口</b><span>返回预测类别、最高置信度和按概率降序排列的完整类别概率数组。</span></div><div class="api-grid"><section class="panel"><h2>接口信息</h2><div class="endpoint"><span>POST</span><code>https://demo.ml-studio.local/v1/predict/${item.id}</code></div><h3>请求 JSON</h3><pre>{ ${features.map((feature, index) => `"${feature.name}": ${feature.type === 'number' ? 18 + index : '"示例值"'}`).join(', ')} }</pre></section><section class="panel api-test"><h2>测试请求</h2>${features.map((feature, index) => `<label>${esc(feature.name)}<input value="${feature.type === 'number' ? 18 + index : '示例值'}"></label>`).join('')}${button('发送模拟请求', 'test-api', 'primary')}<div id="api-response" class="api-response"><span>响应会显示在这里</span></div></section></div>`);
+  return shell(`${pageHead('API 接入说明', `${esc(item.name)} · 多分类演示接口`)}<div class="api-warning"><b>演示接口</b><span>返回预测类别、最高置信度和按概率降序排列的完整类别概率数组。</span></div><div class="api-grid"><section class="panel"><h2>接口信息</h2><div class="endpoint"><span>POST</span><code>https://demo.ml-studio.local/v1/predict/${esc(item.id)}</code></div><h3>请求 JSON</h3><pre>{ ${features.map((feature, index) => `"${esc(feature.name)}": ${feature.type === 'number' ? 18 + index : '"示例值"'}`).join(', ')} }</pre></section><section class="panel api-test"><h2>测试请求</h2>${features.map((feature, index) => `<label>${esc(feature.name)}<input value="${feature.type === 'number' ? 18 + index : '示例值'}"></label>`).join('')}${button('发送模拟请求', 'test-api', 'primary')}<div id="api-response" class="api-response"><span>响应会显示在这里</span></div></section></div>`);
 };
 function apiResponseV9() {
   if (taskKeyV9(project()) !== 'multiclass') return { prediction: dataset().positive || '是', probability: .78, positiveClass: dataset().positive || '是', threshold: .5, mock: true };
@@ -2851,14 +2949,14 @@ action = function (name) {
     const saved = new Set(state.savedResults[item.id] || []);
     const additions = selected.filter(resultId => !saved.has(resultId));
     const duplicateCount = selected.length - additions.length;
-    if (!additions.length) return toast('该结果已保存到模型库。');
-    additions.forEach(resultId => {
+    selected.forEach(resultId => {
       saved.add(resultId);
       const key = `${item.id}:${resultId}`;
-      const createdAt = now();
+      const createdAt = state.savedResultMeta[key]?.createdAt || state.savedResultSnapshots[key]?.createdAt || now();
       const result = item.results.find(row => row.id === resultId);
-      state.savedResultMeta[key] = { createdAt };
-      state.savedResultSnapshots[key] = { experimentId: item.id, projectId: item.projectId, datasetId: item.datasetId, experimentName: item.name, type: item.type, result: cloneV7(result), createdAt };
+      if (!result) return;
+      state.savedResultMeta[key] ||= { createdAt };
+      state.savedResultSnapshots[key] ||= { experimentId: item.id, projectId: item.projectId, datasetId: item.datasetId, experimentName: item.name, type: item.type, result: cloneV7(result), createdAt };
     });
     state.savedResults[item.id] = [...saved];
     state.libraryReturnContext = { page: 'tuning', projectId: item.projectId, datasetId: item.datasetId, experimentId: item.id };
@@ -2870,7 +2968,7 @@ action = function (name) {
     state.librarySort = taskKeyV9(project()) === 'regression' ? 'rmse' : taskKeyV9(project()) === 'multiclass' ? 'macroF1' : 'auc';
     state.libraryTab = 'compare';
     save(); go('models');
-    if (duplicateCount) setTimeout(() => toast('已保存新结果；已存在的结果未重复添加。'), 0);
+    if (duplicateCount) setTimeout(() => toast(additions.length ? '已保存新结果；已存在的结果未重复添加。' : '结果已存在，已进入模型库。'), 0);
     return;
   }
   if (name === 'return-library-source-v86' && state.libraryReturnContext?.page === 'tuning') {
@@ -2949,8 +3047,6 @@ render();
 // ============================================================================
 // V9.0.10 — front-end model report saving demo
 // ============================================================================
-state.savedReports = recordV7(state.savedReports);
-
 function currentReportContextV910() {
   const owner = project(), set = dataset(), item = experiment();
   if (!owner || !set || !item) return null;
@@ -2963,63 +3059,644 @@ function defaultReportNameV910(context) {
   return `${context.owner.name}_${context.set.name}_${context.item.name}_${schemeLabelV8(context.item, context.result)}`.replace(/[\\/:*?"<>|]+/g, '-');
 }
 
-function openSaveReportModalV910() {
-  const context = currentReportContextV910();
-  if (!context) return toast('当前模型报告不可用。');
-  const existing = state.savedReports[context.key];
-  modal(`<h2>${existing ? '更新保存模型报告' : '保存模型报告'}</h2><p>保存当前参数方案对应的模型报告状态，用于前端流程演示。</p><label class="field"><span>报告名称</span><input id="report-name-v910" value="${esc(existing?.name || defaultReportNameV910(context))}" maxlength="120"></label><label class="field"><span>报告格式</span><select id="report-format-v910"><option value="pdf">PDF 报告（前端演示）</option></select></label><div class="notice"><b>演示说明</b><span>当前版本只在浏览器本地记录报告名称、保存时间和报告快照，不生成真实文件，也不上传服务器。</span></div><div class="modal-actions">${button('取消', 'close-modal')}${button(existing ? '确认更新' : '确认保存', 'confirm-save-report-v910', 'primary')}</div>`);
+// V9.1.0 final activation: data lineage, safe retargeting and preview paging.
+state.previewPagesV910 ||= {};
+
+function datasetRequiresTargetCopyV910(set) {
+  return Boolean((set?.experiments || []).length)
+    || Object.values(state.savedResultSnapshots || {}).some(snapshot => snapshot.datasetId === set?.id)
+    || (state.apiConfigs || []).some(config => state.experiments[config.experimentId]?.datasetId === set?.id);
+}
+
+function regressionTargetCheckV910(set, target) {
+  const column = set?.columns?.find(item => item.name === target);
+  if (!column) return { ok: false, message: '未找到目标列。' };
+  if (column.type !== 'number') return { ok: false, message: '回归任务的目标列必须是数值型。' };
+  if (column.missing >= 1) return { ok: false, message: '目标列不能全部为空。' };
+  return { ok: true, column };
+}
+
+function resetRegressionTargetV910(set, target) {
+  const previousTarget = set.target;
+  set.columns.forEach(column => {
+    column.target = column.name === target;
+    if (column.target) {
+      column.included = false;
+      column.reason = '';
+    } else if (column.name === previousTarget) {
+      column.included = false;
+      if (column.trainable) column.reason = '原目标列，默认排除以避免目标泄漏';
+    } else {
+      column.included = Boolean(column.trainable);
+    }
+  });
+  set.target = target;
+  set.positive = '';
+  delete set.classificationMode;
+  delete set.classCounts;
+  delete set.missingTargetRows;
+  set.feature = { missing: 'median', split: set.feature?.split || '80-20', revision: (set.feature?.revision || 0) + 1 };
+}
+
+function copyRegressionDatasetV910(source, target, preferredName) {
+  const owner = project();
+  const copy = cloneV7(source);
+  copy.id = uid('d');
+  copy.projectId = owner.id;
+  copy.name = uniqueDatasetNameV909(owner, preferredName || `${source.name} - 副本`);
+  copy.uploadedAt = now();
+  copy.experiments = [];
+  resetRegressionTargetV910(copy, target);
+  state.datasets[copy.id] = copy;
+  owner.datasets.push(copy.id);
+  owner.updatedAt = now();
+  return copy;
+}
+
+function openRegressionRetargetModalV910() {
+  const set = dataset();
+  const candidates = set.columns.filter(column => column.name !== set.target && column.type === 'number');
+  if (!candidates.length) return toast('当前数据集没有其他数值型目标列。', 'warning');
+  modal(`<h2>复制并修改目标列</h2><p>原数据集及其训练结果、模型和 API 配置保持不变。</p><label class="field"><span>副本名称</span><input id="regression-copy-name-v910" value="${esc(`${set.name} - 副本`)}" maxlength="80"></label><label class="field"><span>新目标列</span><select id="regression-target-v910">${candidates.map(column => `<option value="${esc(column.name)}">${esc(column.name)}</option>`).join('')}</select></label><div class="modal-actions">${button('取消', 'close-modal')}${button('创建副本', 'confirm-regression-retarget-v910', 'primary')}</div>`);
   bindDynamicModalV909();
 }
 
-function enhanceReportSaveV910() {
-  if (state.page !== 'report') return;
-  const context = currentReportContextV910();
-  const actions = app.querySelector('.page-head .head-actions');
-  if (!context || !actions || actions.querySelector('[data-action="save-report-v910"]')) return;
-  const saved = state.savedReports[context.key];
-  actions.insertAdjacentHTML('beforeend', `${saved ? `<span class="report-save-status"><b>已保存</b><small>${esc(saved.savedAt)}</small></span>` : ''}${button(saved ? '更新保存' : '保存模型报告', 'save-report-v910', saved ? '' : 'primary')}`);
+function previewSectionV910(set) {
+  const pageSize = 30;
+  const totalPages = Math.max(1, Math.ceil(set.preview.length / pageSize));
+  const current = Math.min(totalPages - 1, Math.max(0, Number(state.previewPagesV910[set.id] || 0)));
+  state.previewPagesV910[set.id] = current;
+  const start = current * pageSize;
+  const rows = set.preview.slice(start, start + pageSize);
+  const headers = set.columns.map(column => column.name);
+  return `<div class="section-title"><h2>数据预览</h2><span>最多读取前 150 行 · 每页 30 行</span></div><div class="table-card preview-table"><table><thead><tr>${headers.map(value => `<th>${esc(value)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${headers.map((_, index) => `<td class="${set.columns[index]?.type === 'number' ? 'numeric-cell' : ''}">${esc(row[index] === '' || row[index] === null || row[index] === undefined ? '—' : row[index])}</td>`).join('')}</tr>`).join('')}</tbody></table><div class="pagination"><button data-action="preview-page-v910:${current - 1}" ${current === 0 ? 'disabled' : ''}>上一页</button><span>第 ${current + 1} 页 / 共 ${totalPages} 页 · ${start + 1}–${Math.min(start + pageSize, set.preview.length)} 行</span><button data-action="preview-page-v910:${current + 1}" ${current >= totalPages - 1 ? 'disabled' : ''}>下一页</button></div></div>`;
 }
 
-const previousActionV910 = action;
-action = function (name) {
-  if (name === 'save-report-v910') return openSaveReportModalV910();
-  if (name === 'confirm-save-report-v910') {
-    const context = currentReportContextV910();
-    const reportName = document.querySelector('#report-name-v910')?.value.trim();
-    if (!context) return toast('当前模型报告不可用。');
-    if (!reportName) return toast('请输入报告名称。');
-    const savedAt = now();
-    state.savedReports[context.key] = {
-      id: state.savedReports[context.key]?.id || uid('report'),
-      key: context.key,
-      name: reportName,
-      format: 'pdf',
-      projectId: context.owner.id,
-      projectName: context.owner.name,
-      datasetId: context.set.id,
-      datasetName: context.set.name,
-      experimentId: context.item.id,
-      experimentName: context.item.name,
-      resultId: context.result.id,
-      scheme: schemeLabelV8(context.item, context.result),
-      task: taskKeyV9(context.owner),
-      savedAt,
-      resultSnapshot: cloneV7(context.result)
-    };
-    document.querySelector('.modal-backdrop')?.remove();
-    save(); render();
-    return toast('模型报告已保存（前端演示）。');
-  }
-  return previousActionV910(name);
+const datasetPageBeforeV910Final = datasetPage;
+datasetPage = function () {
+  const set = dataset();
+  const owner = project();
+  let content = datasetPageBeforeV910Final();
+  if (!set || !owner) return content;
+  const requiresCopy = datasetRequiresTargetCopyV910(set);
+  const candidates = owner.task === 'regression' ? set.columns.filter(column => column.type === 'number') : set.columns;
+  const targetAction = owner.task === 'regression' ? 'copy-retarget-regression-v910' : 'copy-retarget-dataset-v909';
+  const note = requiresCopy ? '已有实验或模型，原数据集保持不变' : owner.task === 'regression' ? '仅可选择数值型字段' : '仅可切换为项目当前分类子类型';
+  const targetControl = `<div class="stat target-column-stat"><span>目标列</span><select data-target-select ${requiresCopy ? 'disabled' : ''}>${candidates.map(column => `<option value="${esc(column.name)}" ${column.name === set.target ? 'selected' : ''}>${esc(column.name)}</option>`).join('')}</select>${requiresCopy ? button('复制并修改目标列', targetAction) : ''}<small>${note}</small></div>`;
+  content = content.replace(/<div class="stat target-column-stat">[\s\S]*?<\/div>/, targetControl);
+  content = content.replace(/<div class="section-title"><h2>数据预览<\/h2>[\s\S]*?<div class="table-card preview-table">[\s\S]*?<\/table><\/div>/, previewSectionV910(set));
+  return content;
 };
 
-const previousBindV910 = bind;
+function trainingSnapshotV910(item, result) {
+  const owner = state.projects.find(entry => entry.id === item.projectId);
+  const set = state.datasets[item.datasetId];
+  if (!owner || !set || !result) return null;
+  return {
+    schemaVersion: 1,
+    resultMode: 'demo',
+    metricSource: result.metricSource || DEMO_RESULT_SOURCE_V910,
+    projectId: owner.id,
+    projectName: owner.name,
+    datasetId: set.id,
+    datasetName: set.name,
+    task: taskKeyV9(owner),
+    target: set.target,
+    positive: set.positive || '',
+    classes: Object.keys(set.classCounts || {}),
+    features: set.columns.filter(column => column.included && !column.target).map(column => ({ name: column.name, type: column.type })),
+    split: set.feature?.split || '80-20',
+    preprocessing: cloneV7(result.preprocessing || {}),
+    parameterConfig: cloneV7(result.parameterConfig || {}),
+    trainedAt: result.generatedAt || item.updatedAt || now()
+  };
+}
+
+function attachTrainingSnapshotV910(snapshot) {
+  if (!snapshot || snapshot.trainingSnapshot) return;
+  const item = state.experiments[snapshot.experimentId];
+  snapshot.trainingSnapshot = trainingSnapshotV910(item, snapshot.result);
+}
+
+Object.values(state.savedResultSnapshots || {}).forEach(attachTrainingSnapshotV910);
+
+let modalReturnFocusV910 = null;
+let toastTimerV910 = null;
+
+function closeModalV910() {
+  document.querySelector('.modal-backdrop')?.remove();
+  if (modalReturnFocusV910?.isConnected) modalReturnFocusV910.focus();
+  modalReturnFocusV910 = null;
+}
+
+modal = function (content) {
+  closeModalV910();
+  modalReturnFocusV910 = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const titleId = `modal-title-${Date.now()}`;
+  document.body.insertAdjacentHTML('beforeend', `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="${titleId}">${content}</div></div>`);
+  const root = document.querySelector('.modal-backdrop');
+  const dialog = root?.querySelector('.modal');
+  const title = dialog?.querySelector('h2');
+  if (title) title.id = titleId;
+  bindModal();
+  root?.querySelectorAll('[data-action="close-modal"]').forEach(control => control.onclick = event => { event.stopPropagation(); closeModalV910(); });
+  const danger = root?.querySelector('[data-action^="delete-entity:"], [data-action^="confirm-delete-api-v910"]');
+  const initial = danger ? root.querySelector('[data-action="close-modal"]') : root?.querySelector('input:not([disabled]), select:not([disabled]), button:not([disabled])');
+  setTimeout(() => initial?.focus(), 0);
+  root?.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeModalV910();
+      return;
+    }
+    if (event.key !== 'Tab' || !dialog) return;
+    const focusable = [...dialog.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+};
+
+toast = function (message, type = 'auto') {
+  const element = document.querySelector('#toast');
+  if (!element) return;
+  const text = String(message || '');
+  const inferred = type === 'auto'
+    ? (/失败|错误|无法|不存在|不支持/.test(text) ? 'error' : /请输入|不能|至少|请先|风险|超过|未找到/.test(text) ? 'warning' : 'success')
+    : type;
+  clearTimeout(toastTimerV910);
+  element.textContent = text;
+  element.className = `toast show ${inferred}`;
+  element.setAttribute('role', inferred === 'error' ? 'alert' : 'status');
+  element.setAttribute('aria-live', inferred === 'error' ? 'assertive' : 'polite');
+  element.onclick = () => element.classList.remove('show');
+  if (inferred !== 'error') toastTimerV910 = setTimeout(() => element.classList.remove('show'), inferred === 'warning' ? 5000 : 3000);
+};
+
+function currentTrainingSnapshotV910() {
+  const context = currentReportContextV910();
+  if (!context) return null;
+  const saved = state.savedResultSnapshots?.[context.key];
+  return saved?.trainingSnapshot || trainingSnapshotV910(context.item, context.result);
+}
+
+function trainingSnapshotPanelV910(snapshot) {
+  if (!snapshot) return '';
+  const featureCount = snapshot.features?.length || 0;
+  const targetDetail = snapshot.positive ? `${snapshot.target}（正类：${snapshot.positive}）` : snapshot.target;
+  return `<section class="section-block report-training-snapshot"><div class="section-title"><h2>训练信息</h2><span>保存模型时的配置快照</span></div><div class="report-snapshot-grid"><div><span>任务</span><b>${esc(snapshot.task === 'multiclass' ? '多分类' : snapshot.task === 'classification' ? '二分类' : '回归')}</b></div><div><span>目标列</span><b>${esc(targetDetail)}</b></div><div><span>入模特征</span><b>${featureCount} 个</b></div><div><span>数据划分</span><b>${esc(snapshot.split)}</b></div><div><span>训练时间</span><b>${esc(snapshot.trainedAt)}</b></div><div><span>结果来源</span><b>前端模拟</b></div></div></section>`;
+}
+
+enhanceReportSaveV910 = function () {
+  if (state.page !== 'report') return;
+  const actions = app.querySelector('.page-head .head-actions');
+  if (actions && !actions.querySelector('[data-action="export-report-v910"]')) actions.insertAdjacentHTML('beforeend', button('导出报告', 'export-report-v910', 'primary'));
+  if (!app.querySelector('.report-training-snapshot')) {
+    const guide = app.querySelector('.metric-guide');
+    const panel = trainingSnapshotPanelV910(currentTrainingSnapshotV910());
+    if (panel) guide ? guide.insertAdjacentHTML('beforebegin', panel) : app.querySelector('.page')?.insertAdjacentHTML('beforeend', panel);
+  }
+};
+
+async function copyEndpointV910() {
+  const value = document.querySelector('.endpoint code')?.textContent?.trim();
+  if (!value) return toast('未找到接口地址。', 'error');
+  try {
+    if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(value);
+    else {
+      const input = document.createElement('textarea');
+      input.value = value;
+      input.setAttribute('readonly', '');
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.select();
+      if (!document.execCommand('copy')) throw new Error('copy failed');
+      input.remove();
+    }
+    return toast('接口地址已复制。', 'success');
+  } catch {
+    modal(`<h2>请手动复制接口地址</h2><label class="field"><span>接口地址</span><input value="${esc(value)}" readonly></label><div class="modal-actions">${button('关闭', 'close-modal', 'primary')}</div>`);
+  }
+}
+
+function exportReportV910() {
+  const context = currentReportContextV910();
+  if (!context) return toast('当前模型报告不可用。', 'error');
+  const previousTitle = document.title;
+  document.title = defaultReportNameV910(context);
+  document.body.classList.add('printing-report');
+  const restore = () => {
+    document.body.classList.remove('printing-report');
+    document.title = previousTitle;
+    window.removeEventListener('afterprint', restore);
+  };
+  window.addEventListener('afterprint', restore);
+  window.print();
+  setTimeout(restore, 1000);
+}
+
+function filterIsActiveV910(key, detail = false) {
+  if (!detail) {
+    if (key === 'project') return state.libraryProjectId !== 'all';
+    if (key === 'dataset') return state.libraryDatasetId !== 'all';
+    if (key === 'modelType') return state.libraryModelType !== 'all';
+  } else {
+    if (key === 'dataset') return state.libraryDetailDatasetId !== 'all';
+    if (key === 'experiment') return state.libraryDetailExperimentId !== 'all';
+    if (key === 'modelType') return state.libraryDetailModelType !== 'all';
+  }
+  return false;
+}
+
+libraryIndexHeaderV88 = function (label, key, filter = '') {
+  const active = state.libraryIndexSortKey === key;
+  const arrow = active ? state.libraryIndexSortDirection === 'asc' ? '↑' : '↓' : '↕';
+  const direction = active ? state.libraryIndexSortDirection === 'asc' ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序' : '点击排序';
+  const filterButton = filter ? `<button type="button" class="library-filter-toggle ${filterIsActiveV910(key) ? 'filter-active' : ''}" data-library-filter-toggle aria-expanded="false"><span>筛选</span><i></i></button>${filter}` : '';
+  return `<th class="library-index-heading ${active ? 'active-sort' : ''}"><div class="library-index-heading-row"><span>${label}</span><button data-action="sort-library-index-v88:${key}" aria-label="${label}${direction}" title="${direction}">${arrow}</button></div>${filterButton}</th>`;
+};
+
+libraryDetailHeaderV909 = function (label, key, filter = '') {
+  const active = state.libraryDetailSortKey === key;
+  const arrow = active ? state.libraryDetailSortDirection === 'asc' ? '↑' : '↓' : '↕';
+  const hint = active ? state.libraryDetailSortDirection === 'asc' ? '当前升序，点击切换为降序' : '当前降序，点击切换为升序' : '点击排序';
+  const filterButton = filter ? `<button type="button" class="library-filter-toggle ${filterIsActiveV910(key, true) ? 'filter-active' : ''}" data-library-filter-toggle aria-expanded="false"><span>筛选</span><i></i></button>${filter}` : '';
+  return `<th class="library-index-heading ${active ? 'active-sort' : ''}"><div class="library-index-heading-row"><span>${label}</span><button data-action="sort-library-detail-v909:${key}" aria-label="${label}${hint}" title="${hint}">${arrow}</button></div>${filterButton}</th>`;
+};
+
+const actionBeforeV910Final = action;
+action = function (name) {
+  if (name === 'close-modal') return closeModalV910();
+  if (name === 'export-report-v910') return exportReportV910();
+  if (name === 'copy-endpoint') return copyEndpointV910();
+  if (name.startsWith('preview-page-v910:')) {
+    state.previewPagesV910[dataset().id] = Math.max(0, Number(name.split(':')[1]));
+    save();
+    return render();
+  }
+  if (name === 'copy-retarget-regression-v910') return openRegressionRetargetModalV910();
+  if (name === 'confirm-regression-retarget-v910') {
+    const source = dataset();
+    const target = document.querySelector('#regression-target-v910')?.value;
+    const preferredName = document.querySelector('#regression-copy-name-v910')?.value.trim();
+    if (!preferredName) return toast('请输入副本名称。', 'warning');
+    const check = regressionTargetCheckV910(source, target);
+    if (!check.ok) return toast(check.message, 'warning');
+    const copy = copyRegressionDatasetV910(source, target, preferredName);
+    state.datasetId = copy.id;
+    state.previewPagesV910[copy.id] = 0;
+    closeModalV910();
+    save();
+    go('dataset');
+    return setTimeout(() => toast('已创建数据集副本并修改目标列，原数据集未变更。', 'success'), 0);
+  }
+  if (name.startsWith('delete-api-config:')) {
+    const id = name.split(':')[1];
+    const config = state.apiConfigs.find(item => item.id === id);
+    if (!config) return toast('API 服务已不存在。', 'warning');
+    modal(`<h2>删除 API 服务</h2><p>只会删除“${esc(config.name)}”的 API 配置，不会删除关联模型。</p><div class="modal-actions">${button('取消', 'close-modal')}${button('确认删除', `confirm-delete-api-v910:${id}`, 'primary')}</div>`);
+    bindDynamicModalV909();
+    return;
+  }
+  if (name.startsWith('confirm-delete-api-v910:')) {
+    const id = name.split(':')[1];
+    state.apiConfigs = state.apiConfigs.filter(item => item.id !== id);
+    closeModalV910();
+    save();
+    render();
+    return setTimeout(() => toast('API 服务已删除，关联模型未受影响。', 'success'), 0);
+  }
+  if (name.startsWith('view-api-config:')) {
+    const config = state.apiConfigs.find(item => item.id === name.split(':')[1]);
+    const item = config && state.experiments[config.experimentId];
+    if (!config || !item) return toast('关联模型不可用，请删除该 API 配置。', 'error');
+  }
+  if (name === 'save-library-results') {
+    const result = actionBeforeV910Final(name);
+    Object.values(state.savedResultSnapshots || {}).forEach(snapshot => {
+      ensureDemoResultMetaV910(snapshot.result, snapshot.createdAt || now());
+      attachTrainingSnapshotV910(snapshot);
+    });
+    save();
+    return result;
+  }
+  return actionBeforeV910Final(name);
+};
+
+function bindFilterPanelsV910() {
+  app.querySelectorAll('[data-library-filter-toggle]').forEach(control => {
+    control.onclick = event => {
+      event.stopPropagation();
+      const heading = control.closest('.library-index-heading');
+      const open = !heading.classList.contains('filter-open');
+      app.querySelectorAll('.library-index-heading.filter-open').forEach(item => {
+        item.classList.remove('filter-open');
+        item.querySelector('[data-library-filter-toggle]')?.setAttribute('aria-expanded', 'false');
+      });
+      heading.classList.toggle('filter-open', open);
+      control.setAttribute('aria-expanded', String(open));
+      const panel = heading.querySelector('.library-index-filter-panel');
+      if (open && panel) {
+        const rect = control.getBoundingClientRect();
+        panel.style.position = 'fixed';
+        panel.style.top = `${rect.bottom + 5}px`;
+        panel.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 210))}px`;
+      } else if (panel) {
+        panel.removeAttribute('style');
+      }
+    };
+  });
+}
+
+const bindBeforeV910Final = bind;
 bind = function () {
-  previousBindV910();
+  bindBeforeV910Final();
   enhanceReportSaveV910();
+  bindFilterPanelsV910();
+  const endpoint = app.querySelector('.endpoint');
+  if (state.page === 'api' && endpoint && !endpoint.querySelector('[data-action="copy-endpoint"]')) endpoint.insertAdjacentHTML('beforeend', button('复制', 'copy-endpoint'));
+  const target = app.querySelector('[data-target-select]');
+  if (project()?.task === 'regression' && target && !target.disabled) {
+    const clean = target.cloneNode(true);
+    target.replaceWith(clean);
+    clean.onchange = event => {
+      const set = dataset();
+      const previousTarget = set.target;
+      const nextTarget = event.target.value;
+      const check = regressionTargetCheckV910(set, nextTarget);
+      if (!check.ok) {
+        clean.value = previousTarget;
+        return toast(check.message, 'warning');
+      }
+      resetRegressionTargetV910(set, nextTarget);
+      project().updatedAt = now();
+      state.previewPagesV910[set.id] = 0;
+      save();
+      render();
+      return toast(`目标列已修改为“${nextTarget}”。`, 'success');
+    };
+  }
+  app.querySelectorAll('[data-open-project], [data-open-dataset], [data-open-experiment]').forEach(card => {
+    card.tabIndex = 0;
+    card.setAttribute('role', 'link');
+    card.onkeydown = event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      card.click();
+    };
+  });
   app.querySelectorAll('[data-action]').forEach(element => element.onclick = event => { event.stopPropagation(); action(element.dataset.action); });
 };
 
+if (!document.documentElement.dataset.filterDismissV910) {
+  document.documentElement.dataset.filterDismissV910 = 'true';
+  document.addEventListener('click', event => {
+    if (event.target.closest('.library-index-heading')) return;
+    document.querySelectorAll('.library-index-heading.filter-open').forEach(item => {
+      item.classList.remove('filter-open');
+      item.querySelector('[data-library-filter-toggle]')?.setAttribute('aria-expanded', 'false');
+    });
+  });
+  window.addEventListener('scroll', () => {
+    document.querySelectorAll('.library-index-heading.filter-open').forEach(item => {
+      item.classList.remove('filter-open');
+      item.querySelector('[data-library-filter-toggle]')?.setAttribute('aria-expanded', 'false');
+    });
+  }, true);
+}
+
+function routeIdV910(value) {
+  return encodeURIComponent(String(value || ''));
+}
+
+function routeHashV910() {
+  const owner = project();
+  const set = dataset();
+  const item = experiment();
+  if (state.page === 'home') return '#/home';
+  if (state.page === 'projects') return '#/projects';
+  if (state.page === 'models') {
+    const scope = state.libraryDetailScope;
+    return scope?.type && scope?.id ? `#/models/${scope.type}/${routeIdV910(scope.id)}` : '#/models';
+  }
+  if (state.page === 'project' && owner) return `#/project/${routeIdV910(owner.id)}`;
+  if (state.page === 'dataset' && owner && set) return `#/dataset/${routeIdV910(owner.id)}/${routeIdV910(set.id)}`;
+  if (state.page === 'feature' && owner && set) return `#/feature/${routeIdV910(owner.id)}/${routeIdV910(set.id)}`;
+  if (state.page === 'experiments' && owner && set) return `#/experiments/${routeIdV910(owner.id)}/${routeIdV910(set.id)}`;
+  if (state.page === 'model-select' && owner && set) return `#/model-select/${routeIdV910(owner.id)}/${routeIdV910(set.id)}`;
+  if (['experiment', 'tuning', 'report', 'api'].includes(state.page) && owner && set && item) return `#/${state.page}/${routeIdV910(owner.id)}/${routeIdV910(set.id)}/${routeIdV910(item.id)}`;
+  return state.projects.length ? '#/projects' : '#/home';
+}
+
+function decodeRoutePartV910(value) {
+  try { return decodeURIComponent(value || ''); } catch { return ''; }
+}
+
+function resolveRouteContextV910(projectId, datasetId, experimentId) {
+  const owner = state.projects.find(entry => entry.id === projectId);
+  if (!owner) return { ok: false, fallback: 'projects' };
+  state.projectId = owner.id;
+  if (!datasetId) return { ok: true, owner };
+  const set = state.datasets[datasetId];
+  if (!set || set.projectId !== owner.id) return { ok: false, fallback: 'project', owner };
+  state.datasetId = set.id;
+  if (!experimentId) return { ok: true, owner, set };
+  const item = state.experiments[experimentId];
+  if (!item || item.datasetId !== set.id || item.projectId !== owner.id) return { ok: false, fallback: 'experiments', owner, set };
+  state.experimentId = item.id;
+  return { ok: true, owner, set, item };
+}
+
+function applyHashRouteV910() {
+  const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeRoutePartV910);
+  if (!parts.length) return false;
+  const [page, projectId, datasetId, experimentId] = parts;
+  if (page === 'home') state.page = 'home';
+  else if (page === 'projects') state.page = 'projects';
+  else if (page === 'models') {
+    state.page = 'models';
+    const scopeType = projectId;
+    const scopeId = datasetId;
+    if (['project', 'dataset', 'experiment'].includes(scopeType) && scopeId) {
+      const exists = scopeType === 'project' ? state.projects.some(item => item.id === scopeId) : scopeType === 'dataset' ? Boolean(state.datasets[scopeId]) : Boolean(state.experiments[scopeId]);
+      state.libraryDetailScope = exists ? { type: scopeType, id: scopeId } : null;
+    } else state.libraryDetailScope = null;
+  } else if (page === 'project') {
+    const context = resolveRouteContextV910(projectId);
+    state.page = context.ok ? 'project' : context.fallback;
+  } else if (['dataset', 'feature', 'experiments', 'model-select'].includes(page)) {
+    const context = resolveRouteContextV910(projectId, datasetId);
+    state.page = context.ok ? page : context.fallback;
+  } else if (['experiment', 'tuning', 'report', 'api'].includes(page)) {
+    const context = resolveRouteContextV910(projectId, datasetId, experimentId);
+    if (context.ok && page === 'report' && !(context.item.results || []).length) state.page = 'experiment';
+    else state.page = context.ok ? page : context.fallback;
+  } else {
+    state.page = state.projects.length ? 'projects' : 'home';
+  }
+  save();
+  const canonical = routeHashV910();
+  if (location.hash !== canonical) history.replaceState(null, '', canonical);
+  render();
+  return true;
+}
+
+go = function (page, options = {}) {
+  state.page = page;
+  save();
+  const hash = routeHashV910();
+  if (location.hash !== hash) {
+    if (options.replace) history.replaceState(null, '', hash);
+    else history.pushState(null, '', hash);
+  }
+  render();
+};
+
+if (!document.documentElement.dataset.hashRouterV910) {
+  document.documentElement.dataset.hashRouterV910 = 'true';
+  let routeFramePendingV910 = false;
+  const scheduleRouteApplyV910 = () => {
+    if (routeFramePendingV910) return;
+    routeFramePendingV910 = true;
+    setTimeout(() => {
+      routeFramePendingV910 = false;
+      applyHashRouteV910();
+    }, 0);
+  };
+  window.addEventListener('popstate', scheduleRouteApplyV910);
+  window.addEventListener('hashchange', scheduleRouteApplyV910);
+}
+
+const actionBeforeRouteV910 = action;
+action = function (name) {
+  const result = actionBeforeRouteV910(name);
+  if (name.startsWith('open-library-scope-v8:') || name === 'close-library-detail-v8') {
+    const hash = routeHashV910();
+    if (location.hash !== hash) history.pushState(null, '', hash);
+  }
+  return result;
+};
+
+const makeResultsLatestBaseV910 = makeResults;
+makeResults = function (task, count) {
+  return makeResultsLatestBaseV910(task, count).map(result => ensureDemoResultMetaV910(result));
+};
+
+parseCsv = function (text, name) {
+  try {
+    const set = buildCsvDatasetV910(parseCsvRowsV910(text), name);
+    const owner = project();
+    state.datasets[set.id] = set;
+    owner.datasets.push(set.id);
+    owner.updatedAt = now();
+    state.datasetId = set.id;
+    state.previewPagesV910[set.id] = 0;
+    save();
+    go('project');
+    return setTimeout(() => toast('数据集已创建。', 'success'), 0);
+  } catch (error) {
+    return toast(error?.message || 'CSV 解析失败，请检查文件格式。', 'error');
+  }
+};
+
+// ============================================================================
+// V9.1.1 navigation hardening
+// ============================================================================
+state.reportReturnContextV911 = state.reportReturnContextV911 && typeof state.reportReturnContextV911 === 'object'
+  ? state.reportReturnContextV911
+  : null;
+
+steps = function (active) {
+  const labels = [['dataset', '数据检查'], ['feature', '特征准备'], ['experiments', '模型训练'], ['tuning', '训练结果'], ['report', '模型报告']];
+  const activeIndex = labels.findIndex(item => item[0] === active);
+  const currentSet = dataset();
+  const currentExperiment = experiment();
+  const resultReady = Boolean(currentExperiment?.results?.length);
+  return `<div class="stepper">${labels.map((item, index) => {
+    const available = Boolean(currentSet) && (index < 3 || resultReady);
+    const stateClass = index === activeIndex ? 'active' : index < activeIndex ? 'done' : '';
+    const navigation = available ? `data-page="${item[0]}"` : 'disabled aria-disabled="true" title="完成模型训练后可进入"';
+    return `<button ${navigation} class="${stateClass}"><i>${index < activeIndex ? '✓' : index + 1}</i><span>${item[1]}</span></button>`;
+  }).join('')}</div>`;
+};
+
+function reportReturnContextV911(page) {
+  return {
+    page,
+    libraryDetailScope: state.libraryDetailScope ? cloneV7(state.libraryDetailScope) : null,
+    libraryReturnContext: state.libraryReturnContext ? cloneV7(state.libraryReturnContext) : null,
+    libraryTab: state.libraryTab
+  };
+}
+
+const goBeforeV911 = go;
+go = function (page, options = {}) {
+  if (state.page === 'report' && page !== 'report') state.reportReturnContextV911 = null;
+  return goBeforeV911(page, options);
+};
+
+const actionBeforeV911 = action;
+action = function (name) {
+  if (name.startsWith('library-report-v7:') || name.startsWith('open-report:')) {
+    state.reportReturnContextV911 = reportReturnContextV911('models');
+  } else if (name.startsWith('report-result:') || name === 'go-report') {
+    state.reportReturnContextV911 = reportReturnContextV911('tuning');
+  }
+
+  if (name === 'return-report-source-v911') {
+    const context = state.reportReturnContextV911;
+    state.reportReturnContextV911 = null;
+    if (context?.page === 'models') {
+      state.libraryDetailScope = context.libraryDetailScope;
+      state.libraryReturnContext = context.libraryReturnContext;
+      state.libraryTab = context.libraryTab || 'compare';
+      save();
+      return go('models');
+    }
+    save();
+    return go('tuning');
+  }
+
+  if (name === 'go-tuning' && state.page === 'report' && state.reportReturnContextV911?.page === 'models') {
+    return action('return-report-source-v911');
+  }
+
+  const result = actionBeforeV911(name);
+  const hash = routeHashV910();
+  if (location.hash !== hash) history.pushState(null, '', hash);
+  return result;
+};
+
+const bindBeforeV911 = bind;
+bind = function () {
+  bindBeforeV911();
+  if (state.page !== 'report' || state.reportReturnContextV911?.page !== 'models') return;
+  const control = app.querySelector('.flow-footer [data-action="go-tuning"]');
+  if (!control) return;
+  control.textContent = '返回模型库';
+  control.dataset.action = 'return-report-source-v911';
+  control.onclick = event => {
+    event.stopPropagation();
+    action('return-report-source-v911');
+  };
+};
+
+Object.values(state.experiments).forEach(item => (item.results || []).forEach(result => ensureDemoResultMetaV910(result, item.updatedAt || now())));
+Object.values(state.savedResultSnapshots || {}).forEach(snapshot => {
+  ensureDemoResultMetaV910(snapshot.result, snapshot.createdAt || now());
+  attachTrainingSnapshotV910(snapshot);
+});
 save();
-render();
+if (!applyHashRouteV910()) {
+  history.replaceState(null, '', routeHashV910());
+  render();
+}
 

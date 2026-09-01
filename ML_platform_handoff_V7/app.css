@@ -181,6 +181,56 @@
 /* V9.0.9 */
 .target-column-stat{display:flex;flex-direction:column;align-items:flex-start;gap:7px}.target-column-stat>select{width:100%;min-width:0}.target-column-stat>.btn{width:100%;padding:7px 9px}.target-column-stat>small{margin-top:0}
 .result-table .result-save-column{width:56px;min-width:56px;max-width:56px;padding-left:7px;padding-right:7px;text-align:center}.result-table .result-rank-column{width:60px;min-width:60px;max-width:60px;padding-left:7px;padding-right:7px;text-align:center}.result-table .result-scheme-column{width:150px;min-width:150px;max-width:150px}.result-scheme-column .scheme-label{width:100%;max-width:100%;min-width:0}.result-scheme-column .scheme-label>b{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.library-scheme-column{width:150px;min-width:150px}.library-detail-table{max-width:100%;overflow:auto;overscroll-behavior:contain}.library-detail-table:has(.library-index-heading:hover),.library-detail-table:has(.library-index-heading:focus-within){padding-bottom:250px}.library-detail-table .library-index-heading{width:auto;min-width:0}.tuning-toolbar+.table-card .result-table,.library-detail-table table{width:100%;min-width:100%;table-layout:auto}.result-table .sortable-metric,.result-table .metric-value-cell,.library-detail-table .sortable-metric,.library-detail-table .metric-value-cell{width:auto;min-width:104px;white-space:nowrap}.metric-value-cell>b,.metric-value-cell>small{white-space:nowrap}.library-detail-table th,.library-detail-table td,.library-detail-table .library-scope-link{white-space:nowrap}.library-detail-table .sticky-action-column{width:1%;min-width:max-content;white-space:nowrap}.library-detail-table .sticky-action-column .row-actions{width:max-content;flex-wrap:nowrap}.library-detail-table .sticky-action-column .btn{flex:0 0 auto;white-space:nowrap}
-.report-save-status{display:grid;align-content:center;min-width:108px;padding:4px 10px;border-radius:8px;background:var(--green50);color:var(--green)}.report-save-status b,.report-save-status small{display:block}.report-save-status b{font-size:11px}.report-save-status small{margin-top:2px;font-size:9px;white-space:nowrap}
 .threshold-panel.v9-thresholds{gap:10px;margin-bottom:12px}.threshold-panel.v9-thresholds label,.threshold-panel.v9-thresholds label:first-of-type{min-width:0}.threshold-panel.v9-thresholds i{color:var(--blue);font-style:normal}
+
+/* V9.1.0 — interaction, compact responsive layout and report export */
+html{scroll-padding-top:76px}
+.sidebar{overflow-y:auto;overscroll-behavior:contain}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,[role="link"]:focus-visible{outline:3px solid rgba(37,99,235,.28);outline-offset:2px}
+td,th,.metric-card b,.result-metrics b{font-variant-numeric:tabular-nums}
+.modal{width:min(520px,calc(100vw - 40px));max-height:calc(100vh - 40px);overflow:auto;overscroll-behavior:contain}
+.toast{max-width:min(420px,calc(100vw - 40px));cursor:pointer}
+.toast.success{background:#126b4b}.toast.warning{background:#8a5516}.toast.error{background:#a62f3d}
+.library-detail-table:has(.library-index-heading:hover),.library-detail-table:has(.library-index-heading:focus-within){padding-bottom:0}
+.library-index-heading:hover>.library-index-filter-panel,.library-index-heading:focus-within>.library-index-filter-panel{display:none}
+.library-index-heading.filter-open>.library-index-filter-panel{display:grid}
+.library-filter-toggle{display:flex;align-items:center;gap:5px;margin-top:3px;padding:3px 0;border:0;background:transparent;color:#68758a;font-size:10px}
+.library-filter-toggle i{width:6px;height:6px;border-radius:50%;background:transparent}
+.library-filter-toggle.filter-active{color:var(--blue);font-weight:800}.library-filter-toggle.filter-active i{background:var(--blue)}
+.library-index-filter-panel{z-index:120}
+.preview-table{max-width:100%;overflow:auto;overscroll-behavior:contain}.preview-table th{position:sticky;top:0;z-index:2}.preview-table td{white-space:nowrap}.preview-table td.numeric-cell{text-align:right}
+.report-snapshot-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}
+.report-snapshot-grid>div{padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:#fafbfd}
+.report-snapshot-grid span,.report-snapshot-grid b{display:block}.report-snapshot-grid span{color:var(--muted);font-size:10px}.report-snapshot-grid b{margin-top:5px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+@media (min-width:1024px) and (max-width:1279px){
+  body:before{display:none}
+  .app-shell{display:grid;grid-template-columns:200px minmax(0,1fr)}
+  .sidebar{padding-left:10px;padding-right:10px}
+  .flow-footer{left:200px;padding-left:18px;padding-right:18px}
+  .page{padding:20px 18px}
+  .topbar{padding:0 18px}
+  .card-grid,.experiment-grid,.model-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .hero-grid{grid-template-columns:minmax(0,1fr) 210px}
+  .stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .feature-layout{grid-template-columns:180px minmax(0,1fr)}
+}
+@media (max-width:1023px){
+  body:before{content:"建议使用宽度至少为 1024px 的桌面窗口访问 ML Studio"}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}
+@media print{
+  body:before,.sidebar,.topbar,.stepper,.flow-footer,.toast,.page-head .head-actions,.training-overlay,.training-mini{display:none!important}
+  body,.app-shell,main,.page{display:block!important;width:auto!important;max-width:none!important;margin:0!important;padding:0!important;background:#fff!important}
+  .page-head{margin-bottom:14px}
+  .panel,.table-card,.chart-card,.section-block,.report-hero,.metric-card{box-shadow:none!important;break-inside:avoid}
+  .library-index-filter-panel{display:none!important}
+  @page{size:A4;margin:12mm}
+}
+
+/* V9.1.1: unavailable workflow destinations */
+.stepper button:disabled{cursor:not-allowed;opacity:.48}
+.stepper button:disabled:hover{transform:none}
 
