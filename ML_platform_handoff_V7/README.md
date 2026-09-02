@@ -4,12 +4,13 @@
 
 ## 阅读顺序
 
-1. `PROJECT_HANDOFF.md`
-2. `机器学习训练平台前端开发文档.md`
-3. `frontend-change-requirements-v7.md`（仅用于追溯 V7）
-4. `index.html`、`app.js` 与 `app.css`
+1. `AI_HANDOFF.md`（面向大模型和新开发者的精简事实摘要）
+2. `PROJECT_HANDOFF.md`（完整交接记录）
+3. `机器学习训练平台前端开发文档.md`
+4. `frontend-change-requirements-v7.md`（仅用于追溯 V7）
+5. `index.html`、`app.js` 与 `app.css`
 
-发生冲突时，以用户最新要求、`PROJECT_HANDOFF.md` 的 V10.1 结论和最新版开发文档为准。
+发生冲突时，以用户最新明确要求、`AI_HANDOFF.md`、`PROJECT_HANDOFF.md` 的 V10.2.2 结论和最新版开发文档为准。
 
 ## 运行方式
 
