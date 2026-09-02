@@ -3915,7 +3915,7 @@ function forecastExperimentPageV10() {
 
 function forecastSeriesV10(set = dataset()) {
   const times = forecastValuesV10(set, set.timeColumn), values = forecastValuesV10(set, set.target), map = new Map();
-  times.forEach((value, index) => { const timestamp = parseForecastDateV10(value), target = Number(values[index]); if (Number.isFinite(timestamp) && Number.isFinite(target)) map.set(timestamp, target); });
+  times.forEach((value, index) => { const timestamp = parseForecastDateV10(value), rawTarget = values[index], target = Number(rawTarget); if (Number.isFinite(timestamp) && String(rawTarget ?? '').trim() && Number.isFinite(target)) map.set(timestamp, target); });
   return [...map.entries()].sort((a, b) => a[0] - b[0]).map(([timestamp, value]) => ({ timestamp, date: formatForecastDateV10(timestamp, set.frequency), value }));
 }
 function forecastHashV10(text) { let hash = 2166136261; for (const char of String(text)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); } return Math.abs(hash >>> 0); }
@@ -4043,7 +4043,7 @@ function forecastLibraryDetailV10(detail) {
   const risk = scope.type === 'project' && allDatasetIds.length > 1 ? `<div class="library-risk-note"><b>跨数据集比较风险</b><span>不同数据集的历史范围、目标尺度和预测范围可能不同，请优先在同一数据集内比较。</span></div>` : '';
   const configs = new Set(rows.map(row => `${row.result.frequency || state.datasets[row.item.datasetId]?.frequency}|${row.result.forecastConfig?.horizon || row.result.forecast?.length}`));
   const configWarning = configs.size > 1 ? `<div class="notice"><b>预测配置不同</b><span>当前范围包含不同频率或预测长度，指标仅供查看，不给出跨配置全局最佳结论。</span></div>` : '';
-  const body = rows.length ? rows.map(({ item: rowItem, result }) => { const leadingCells = `${scope.type === 'project' ? `<td>${esc(state.datasets[rowItem.datasetId]?.name || '数据集已删除')}</td>` : ''}${scope.type !== 'experiment' ? `<td>${esc(rowItem.name)}</td><td>${modelName(rowItem.type)}</td>` : ''}`; return `<tr>${leadingCells}<td><b>方案 #${result.id}</b><small>${esc(result.params)}</small></td><td>${result.forecastConfig?.horizon || result.forecast?.length || '—'} 期</td>${metrics.map(key => `<td><b>${forecastMetricValueV10(result, key)}</b></td>`).join('')}<td>${esc(result.cutoff || '—')}</td><td>${esc(result.generatedAt || savedResultCreatedAtV7(rowItem, result))}</td><td><div class="row-actions">${button('查看训练结果', `library-result:${rowItem.id}:${result.id}`)}${button('查看模型报告', `library-report-v7:${rowItem.id}:${result.id}`, 'primary')}${button('生成 API 配置', `open-api-config:${rowItem.id}:${result.id}`)}</div></td></tr>`; }).join('') : `<tr><td colspan="${metrics.length + 9}"><div class="empty-state"><p>当前筛选范围暂无已保存结果。</p></div></td></tr>`;
+  const body = rows.length ? rows.map(({ item: rowItem, result }) => { const leadingCells = `${scope.type === 'project' ? `<td>${esc(state.datasets[rowItem.datasetId]?.name || '数据集已删除')}</td>` : ''}${scope.type !== 'experiment' ? `<td>${esc(rowItem.name)}</td><td>${esc(result.modelDisplayName || modelName(rowItem.type))}</td>` : ''}`; return `<tr>${leadingCells}<td><b>方案 #${result.id}</b><small>${esc(result.params)}</small></td><td>${result.forecastConfig?.horizon || result.forecast?.length || '—'} 期</td>${metrics.map(key => `<td><b>${forecastMetricValueV10(result, key)}</b></td>`).join('')}<td>${esc(result.cutoff || '—')}</td><td>${esc(result.generatedAt || savedResultCreatedAtV7(rowItem, result))}</td><td><div class="row-actions">${button('查看训练结果', `library-result:${rowItem.id}:${result.id}`)}${button('查看模型报告', `library-report-v7:${rowItem.id}:${result.id}`, 'primary')}${button('生成 API 配置', `open-api-config:${rowItem.id}:${result.id}`)}</div></td></tr>`; }).join('') : `<tr><td colspan="${metrics.length + 9}"><div class="empty-state"><p>当前筛选范围暂无已保存结果。</p></div></td></tr>`;
   return `${context}${risk}${configWarning}<div class="library-compact-tools">${forecastMetricPickerV10('library')}<span class="validation-sort-note">筛选集成在表头；指标按当前列排序</span></div><div class="table-card forecast-table-scroll-v10"><table class="forecast-library-table-v10"><thead><tr>${leading}${libraryDetailHeaderV909('参数方案', 'scheme')}<th><button class="metric-sort-v10" data-action="sort-forecast-library-v10:horizon">预测范围 ↕</button></th>${metrics.map(header).join('')}<th><button class="metric-sort-v10" data-action="sort-forecast-library-v10:cutoff">数据截止 ↕</button></th><th><button class="metric-sort-v10" data-action="sort-forecast-library-v10:createdAt">创建时间 ↕</button></th><th class="action-col-v10">操作</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function openForecastApiModalV10(experimentId, resultId) {
@@ -4078,7 +4078,7 @@ newProjectModal = function () {
 const datasetSourceModalBeforeForecastV10 = datasetSourceModal;
 datasetSourceModal = function () {
   if (!isForecastingV10()) return datasetSourceModalBeforeForecastV10();
-  modal(`<h2>添加时序数据集</h2><p>上传单序列 CSV，或使用内置的商品每日销量示例。</p><div class="source-tabs"><button class="active" data-source-tab="upload">上传 CSV</button><button data-source-tab="example">示例数据集</button></div><div class="source-panel active" data-source-panel="upload"><div class="upload-box">${button('选择 CSV 文件', 'choose-csv', 'primary')}<span>支持 UTF-8、带表头的 CSV；最多 5,000 个时间点</span></div></div><div class="source-panel" data-source-panel="example"><div class="example-dataset-grid"><button class="example-dataset-card" data-action="use-example:forecast-sales-v10"><b>商品每日销量示例</b><span>365 个日频时间点 · 目标：销量</span></button></div></div><div class="modal-actions">${button('取消', 'close-modal')}</div>`);
+  modal(`<h2>添加时序数据集</h2><p>上传单序列、多变量 CSV，或使用内置的商品每日销量示例。</p><div class="source-tabs"><button class="active" data-source-tab="upload">上传 CSV</button><button data-source-tab="example">示例数据集</button></div><div class="source-panel active" data-source-panel="upload"><div class="upload-box">${button('选择 CSV 文件', 'choose-csv', 'primary')}<span>一个时间列、一个目标列，可包含多个外部特征；最多 5,000 行</span></div></div><div class="source-panel" data-source-panel="example"><div class="example-dataset-grid"><button class="example-dataset-card" data-action="use-example:forecast-sales-v10"><b>商品每日销量示例</b><span>365 期历史 + 7 期未来特征 · 目标：销量</span></button></div></div><div class="modal-actions">${button('取消', 'close-modal')}</div>`);
   const root = document.querySelector('.modal-backdrop');
   root.querySelectorAll('[data-action]').forEach(control => control.onclick = event => { event.stopPropagation(); action(control.dataset.action); });
   root.querySelectorAll('[data-source-tab]').forEach(tab => tab.onclick = () => { root.querySelectorAll('[data-source-tab]').forEach(item => item.classList.toggle('active', item === tab)); root.querySelectorAll('[data-source-panel]').forEach(panel => panel.classList.toggle('active', panel.dataset.sourcePanel === tab.dataset.sourceTab)); });
@@ -4225,6 +4225,504 @@ bind = function () {
   const featureBack = app.querySelector('.flow-footer [data-action="back-feature-split"]'); if (featureBack) featureBack.textContent = '返回时间与回测';
   app.querySelectorAll('[data-action]').forEach(control => control.onclick = event => { event.stopPropagation(); action(control.dataset.action); });
 };
+
+Object.values(state.datasets).forEach(set => ensureForecastDatasetV10(set));
+save();
+history.replaceState(null, '', routeHashV910());
+render();
+
+// ============================================================================
+// V10.1.1 — forecasting consistency, immutable reports and full-feature API
+// ============================================================================
+state.forecastReportSnapshotKeyV1011 ||= null;
+state.forecastApiInputsV1011 ||= {};
+let forecastReportRenderResultV1011 = null;
+
+function forecastHistoricalHandlingV1011(set, names, type) {
+  if (!forecastUsesExternalV101(type)) return [];
+  return names.map(name => {
+    const column = set.columns.find(item => item.name === name), meta = column?.forecastMeta || (column ? forecastFeatureStatsV101(set, column) : null);
+    if (!column || !meta || meta.missingRate <= 0) return null;
+    const strategy = type === 'forecast_lgbm' ? '保留缺失并生成缺失标记' : column.type === 'number' ? '每轮训练窗口中位数填充' : '每轮训练窗口众数填充';
+    return { name, type: column.type, missingRate: +(meta.missingRate * 100).toFixed(1), strategy };
+  }).filter(Boolean);
+}
+
+const makeForecastResultBeforeV1011 = makeForecastResultV10;
+makeForecastResultV10 = function (item, variant, index) {
+  const result = makeForecastResultBeforeV1011(item, variant, index), set = ensureForecastDatasetV10(state.datasets[item.datasetId]);
+  result.historicalMissingHandling = forecastHistoricalHandlingV1011(set, result.externalFeatures || [], item.type);
+  return result;
+};
+
+forecastDisplayModelNameV101 = function (type, set = dataset()) {
+  if (forecastReportRenderResultV1011?.modelDisplayName) return forecastReportRenderResultV1011.modelDisplayName;
+  return type === 'forecast_arima' && forecastSelectedFeaturesV101(set).length ? 'ARIMAX' : modelName(type);
+};
+
+forecastProcessingSummaryV10 = function (type) {
+  const set = ensureForecastDatasetV10(dataset()), snapshotResult = forecastReportRenderResultV1011, selected = snapshotResult ? (snapshotResult.externalFeatures || []).map(name => set.columns.find(column => column.name === name)).filter(Boolean) : forecastSelectedFeaturesV101(set), names = snapshotResult ? snapshotResult.externalFeatures || [] : selected.map(column => column.name), usesExternal = forecastUsesExternalV101(type) && names.length;
+  const featureText = usesExternal ? names.join('、') : type === 'forecast_baseline' || type === 'forecast_ets' ? '该模型仅使用目标历史，不读取外部特征' : '当前未纳入外部特征';
+  const missingHandling = snapshotResult?.historicalMissingHandling || forecastHistoricalHandlingV1011(set, names, type), missingText = !usesExternal ? '不适用' : missingHandling.length ? missingHandling.map(item => `${item.name}：${item.strategy}`).join('；') : '所选外部特征的历史区间无缺失';
+  const rows = {
+    forecast_baseline: [['模型比较', '历史均值、最后值、季节性最后值、漂移、移动平均'], ['外部特征', featureText]],
+    forecast_ets: [['模型结构', '水平、趋势与季节性组件'], ['外部特征', featureText]],
+    forecast_arima: [['模型结构', usesExternal ? 'ARIMAX：自回归、差分、移动平均与外部特征' : 'ARIMA：自回归、差分与移动平均'], ['使用特征', featureText], ['历史缺失处理', missingText], ['自动处理', '仅在每个训练窗口内确定填充值、差分与阶数']],
+    forecast_prophet: [['模型结构', '趋势、季节性、日历效应与外部回归量'], ['使用特征', featureText], ['历史缺失处理', missingText], ['自动处理', '每轮训练窗口单独确定填充值、变点范围与季节性']],
+    forecast_lgbm: [['模型输入', '目标滞后、滚动统计、趋势序号、日历特征与外部特征'], ['使用特征', featureText], ['历史缺失处理', missingText], ['自动处理', '每轮回测只使用当时已知的信息生成特征']]
+  }[type] || [];
+  return `<div class="forecast-processing-v10">${rows.map(row => `<div><b>${row[0]}</b><span>${esc(row[1])}</span></div>`).join('')}</div>`;
+};
+
+const forecastReportPageBeforeV1011 = forecastReportPageV10;
+forecastReportPageV10 = function () {
+  const item = experiment(), snapshot = state.savedResultSnapshots?.[state.forecastReportSnapshotKeyV1011];
+  if (!item || !snapshot?.result || snapshot.experimentId !== item.id) return forecastReportPageBeforeV1011();
+  const originalResults = item.results, result = cloneV7(snapshot.result);
+  item.results = [...(originalResults || []).filter(row => row.id !== result.id), result];
+  forecastReportRenderResultV1011 = result;
+  try { return forecastReportPageBeforeV1011(); }
+  finally { forecastReportRenderResultV1011 = null; item.results = originalResults; }
+};
+
+const currentReportContextBeforeV1011 = currentReportContextV910;
+currentReportContextV910 = function () {
+  const context = currentReportContextBeforeV1011(), snapshot = state.savedResultSnapshots?.[state.forecastReportSnapshotKeyV1011];
+  return context && snapshot?.result ? { ...context, result: snapshot.result, key: state.forecastReportSnapshotKeyV1011 } : context;
+};
+
+const forecastExperimentsPageBeforeV1011 = forecastExperimentsPageV10;
+forecastExperimentsPageV10 = function () {
+  const set = ensureForecastDatasetV10(dataset()), label = forecastDisplayModelNameV101('forecast_arima', set);
+  return forecastExperimentsPageBeforeV1011().replaceAll('<p>ARIMA ·', `<p>${label} ·`);
+};
+
+const goBeforeForecastV1011 = go;
+go = function (page) { if (page !== 'report') state.forecastReportSnapshotKeyV1011 = null; return goBeforeForecastV1011(page); };
+
+function forecastSavedResultV1011(item, resultId) {
+  return state.savedResultSnapshots?.[`${item.id}:${Number(resultId)}`]?.result || item.results?.find(row => row.id === Number(resultId)) || item.results?.[0];
+}
+
+function forecastResolveFutureValueV1011(set, featureName, timestamp, step) {
+  const times = forecastValuesV10(set, set.timeColumn), values = forecastValuesV10(set, featureName), directIndex = times.findIndex(value => parseForecastDateV10(value) === timestamp), direct = directIndex >= 0 ? values[directIndex] : '';
+  if (String(direct ?? '').trim()) return direct;
+  const policy = set.forecastFuturePolicies?.[featureName] || 'pending', column = set.columns.find(item => item.name === featureName), history = forecastHistoryContextV101(set).historyRows.map(row => values[row.index]).filter(value => String(value ?? '').trim());
+  if (policy === 'recent') return history.at(-1) ?? '';
+  if (policy === 'linear' && column?.type === 'number') { const last = Number(history.at(-1)), previous = Number(history.at(-2)); return Number.isFinite(last) && Number.isFinite(previous) ? +(last + (last - previous) * step).toFixed(3) : ''; }
+  if (policy === 'zero') return column?.type === 'number' ? 0 : '默认值';
+  return '';
+}
+
+function forecastApiDefaultRowsV1011(set, result, horizon, key) {
+  const features = result.externalFeatures || [], stored = state.forecastApiInputsV1011[key] || [], rows = result.forecast.slice(0, horizon).map((point, index) => {
+    const existing = stored[index] || {}, values = {};
+    features.forEach(name => { values[name] = existing.values?.[name] ?? forecastResolveFutureValueV1011(set, name, point.timestamp, index + 1); });
+    return { date: point.date, timestamp: point.timestamp, values };
+  });
+  state.forecastApiInputsV1011[key] = cloneV7(rows); return rows;
+}
+
+function forecastApiRequestV1011(result, rows) {
+  const features = result.externalFeatures || [];
+  if (!features.length) return { horizon: rows.length };
+  return { horizon: rows.length, futureFeatures: rows.map(row => ({ date: row.date, ...row.values })) };
+}
+
+function forecastApiResponseForRowsV1011(result, rows) {
+  const features = result.externalFeatures || [];
+  return { mock: true, forecast: result.forecast.slice(0, rows.length).map((point, index) => { const row = rows[index], influence = features.reduce((sum, name, featureIndex) => { const raw = row.values[name], numeric = Number(raw); return sum + (Number.isFinite(numeric) ? Math.sin(numeric * .11 + featureIndex) * .32 : ((forecastHashV10(raw || name) % 9) - 4) * .07); }, 0), prediction = +(point.prediction + influence).toFixed(2), shift = prediction - point.prediction; return { date: point.date, prediction, interval80: [+(point.lower80 + shift).toFixed(2), +(point.upper80 + shift).toFixed(2)], interval95: [+(point.lower95 + shift).toFixed(2), +(point.upper95 + shift).toFixed(2)] }; }) };
+}
+
+openForecastApiModalV10 = function (experimentId, resultId) {
+  const item = state.experiments[experimentId], set = state.datasets[item.datasetId], snapshots = Object.values(state.savedResultSnapshots || {}).filter(snapshot => snapshot.experimentId === item.id), resultIds = snapshots.length ? snapshots.map(snapshot => snapshot.result.id) : item.results.map(result => result.id), uniqueIds = [...new Set(resultIds)], selected = forecastSavedResultV1011(item, resultId), externalCount = selected?.externalFeatures?.length || 0;
+  modal(`<h2>生成 API 接入配置</h2><p>${externalCount ? `该方案使用 ${externalCount} 个外部特征；请求时需逐期提交完整未来特征。` : '该方案只使用目标历史；请求时填写预测期数。'}</p><label class="field"><span>服务名称</span><input id="api-service-name" name="api-service-name" autocomplete="off" value="${esc(item.name)} API" maxlength="80"></label><label class="field"><span>参数方案</span><select id="api-result-id" name="api-result-id" autocomplete="off">${uniqueIds.map(id => { const result = forecastSavedResultV1011(item, id); return `<option value="${id}" ${id === Number(resultId) ? 'selected' : ''}>#${id} · ${esc(result?.params || '参数方案')}</option>`; }).join('')}</select></label><label class="field"><span>默认预测期数</span><input id="forecast-api-horizon-v10" name="forecast-api-horizon" type="number" min="1" max="${Math.max(1, selected?.forecast?.length || Math.floor(set.timeSummary.validPoints / 4))}" value="${Math.min(set.forecastConfig.horizon, selected?.forecast?.length || set.forecastConfig.horizon)}"></label><div class="modal-actions">${button('取消', 'close-modal')}${button('确认生成', `confirm-forecast-api-v10:${experimentId}`, 'primary')}</div>`);
+  bindDynamicModalV909();
+};
+
+forecastApiPageV10 = function () {
+  const item = experiment(), set = ensureForecastDatasetV10(dataset()), config = [...state.apiConfigs].reverse().find(entry => entry.experimentId === item.id), result = forecastSavedResultV1011(item, config?.resultId || item.selected), horizon = Math.min(Math.max(1, Number(config?.horizon || set.forecastConfig.horizon)), result.forecast.length), key = config?.id || `${item.id}:${result.id}`, features = result.externalFeatures || [], rows = forecastApiDefaultRowsV1011(set, result, horizon, key), request = forecastApiRequestV1011(result, rows), response = state.forecastApiResponsesV1011?.[key] || forecastApiResponseForRowsV1011(result, rows), featureTable = features.length ? `<div class="forecast-api-feature-table-v1011"><div class="section-title"><div><h3>未来外部特征</h3><p>每个预测日期都必须提供完整特征；修改预测期数后表格会同步刷新。</p></div><span>${features.length} 个特征</span></div><div class="table-card"><table><thead><tr><th>日期</th>${features.map(name => `<th>${esc(name)}</th>`).join('')}</tr></thead><tbody>${rows.map((row, rowIndex) => `<tr><td><b>${esc(row.date)}</b></td>${features.map(name => { const column = set.columns.find(item => item.name === name), type = column?.type === 'number' ? 'number' : 'text'; return `<td><input data-forecast-api-feature-row="${rowIndex}" data-forecast-api-feature-name="${esc(name)}" name="forecast-api-${rowIndex}-${esc(name)}" aria-label="${esc(row.date)}的${esc(name)}" autocomplete="off" type="${type}" ${type === 'number' ? 'step="any"' : ''} value="${esc(row.values[name] ?? '')}"></td>`; }).join('')}</tr>`).join('')}</tbody></table></div></div>` : '';
+  return shell(`${pageHead('API 接入说明', `${esc(item.name)} · ${esc(result.params)}`)}<div class="api-grid forecast-api-grid-v1011"><section class="panel"><h2>接口信息</h2><div class="endpoint"><span>POST</span><code>https://demo.ml-studio.local/v1/forecast/${item.id}</code></div><h3>请求 JSON</h3><pre>${esc(JSON.stringify(request, null, 2))}</pre><h3>响应 JSON</h3><pre>${esc(JSON.stringify(response, null, 2))}</pre></section><section class="panel api-test"><h2>测试请求</h2><p>${features.length ? '填写预测期数以及每个未来日期的全部外部特征。' : '该模型只使用目标历史，填写预测期数即可。'}</p><label>预测未来多少期<input data-forecast-api-horizon name="forecast-api-horizon-test" type="number" min="1" max="${result.forecast.length}" value="${horizon}"></label>${featureTable}${button('发送模拟请求', 'test-forecast-api-v10', 'primary')}<div class="api-response"><b>已绑定不可变模型快照</b><span>${esc(result.modelDisplayName || modelName(item.type))} · 数据截止 ${esc(result.cutoff)}</span></div></section></div>`);
+};
+
+function forecastThresholdFeedbackV1011(input) {
+  const key = input.dataset.forecastThreshold, limits = { missing: '请输入 0–99', variance: '请输入 0–0.25', futureCoverage: '请输入 0–100' }, invalid = !input.value.trim() || !input.checkValidity(), label = input.closest('label');
+  input.classList.toggle('range-invalid', invalid); input.setAttribute('aria-invalid', String(invalid));
+  let message = label?.querySelector('.threshold-range-error');
+  if (!message && label) { message = document.createElement('small'); message.className = 'threshold-range-error'; label.appendChild(message); }
+  if (message) { message.textContent = invalid ? limits[key] : ''; message.hidden = !invalid; }
+  return !invalid;
+}
+
+const actionBeforeForecastV1011 = action;
+action = function (name) {
+  if (name.startsWith('library-report-v7:')) {
+    const [, experimentId, resultId] = name.split(':'), item = state.experiments[experimentId], owner = state.projects.find(entry => entry.id === item?.projectId), key = `${experimentId}:${Number(resultId)}`;
+    if (isForecastingV10(owner) && state.savedResultSnapshots?.[key]) {
+      if (!item || !state.datasets[item.datasetId]) return toast('模型实验或数据集已不存在，无法打开报告。', 'error');
+      state.projectId = item.projectId; state.datasetId = item.datasetId; state.experimentId = item.id; item.selected = Number(resultId); state.forecastReportSnapshotKeyV1011 = key; state.reportReturnContextV911 = reportReturnContextV911('models'); save(); return go('report');
+    }
+  }
+  if (isForecastingV10() && (name.startsWith('report-result:') || name === 'go-report')) state.forecastReportSnapshotKeyV1011 = null;
+  if (isForecastingV10() && name === 'forecast-recommend-thresholds-v101') {
+    const defaults = { missing: 90, variance: .01, futureCoverage: 80 };
+    app.querySelectorAll('[data-forecast-threshold]').forEach(input => { input.value = defaults[input.dataset.forecastThreshold]; forecastThresholdFeedbackV1011(input); });
+    return toast('已填入推荐值，点击“应用筛选”后生效。', 'success');
+  }
+  if (isForecastingV10() && name === 'forecast-apply-thresholds-v101') {
+    const set = ensureForecastDatasetV10(dataset()), inputs = [...app.querySelectorAll('[data-forecast-threshold]')], valid = inputs.map(forecastThresholdFeedbackV1011);
+    if (valid.some(value => !value)) { inputs[valid.findIndex(value => !value)]?.focus(); return toast('请修正标红的筛选阈值。', 'warning'); }
+    const values = Object.fromEntries(inputs.map(input => [input.dataset.forecastThreshold, Number(input.value)])); set.forecastFeatureThresholds = values;
+    forecastExternalColumnsV101(set).forEach(column => { const meta = forecastFeatureStatsV101(set, column), policyReady = meta.futureCoverage >= 100 || ['recent', 'linear', 'zero'].includes(set.forecastFuturePolicies[column.name]), passes = meta.trainable && meta.missingRate * 100 <= values.missing && (meta.variance === null || meta.variance >= values.variance) && meta.futureCoverage >= values.futureCoverage && policyReady; column.forecastMeta = meta; column.included = passes; });
+    set.feature.revision = (set.feature.revision || 0) + 1; markForecastExperimentsStaleV10(set); save(); render(); return setTimeout(() => toast('已按当前阈值和缺失策略更新外部特征。', 'success'), 0);
+  }
+  if (name.startsWith('confirm-forecast-api-v10:')) {
+    const experimentId = name.split(':')[1], item = state.experiments[experimentId], serviceName = document.querySelector('#api-service-name')?.value.trim(), resultId = Number(document.querySelector('#api-result-id')?.value), result = forecastSavedResultV1011(item, resultId), horizon = Number(document.querySelector('#forecast-api-horizon-v10')?.value);
+    if (!serviceName) return toast('请输入服务名称。', 'warning');
+    if (!result || !Number.isInteger(horizon) || horizon < 1 || horizon > result.forecast.length) return toast(`预测期数请输入 1–${result?.forecast?.length || 1}。`, 'warning');
+    const id = uid('api'), key = `${item.id}:${result.id}`; state.apiConfigs.push({ id, name: serviceName, experimentId, resultId: result.id, horizon, createdAt: now(), task: 'forecasting', snapshotKey: state.savedResultSnapshots?.[key] ? key : null, externalFeatures: cloneV7(result.externalFeatures || []), requestMode: result.externalFeatures?.length ? 'full-future-features' : 'horizon-only' });
+    document.querySelector('.modal-backdrop')?.remove(); state.libraryTab = 'api'; state.libraryDetailScope = { type: 'experiment', id: item.id }; state.forecastApiInputsV1011[id] = forecastApiDefaultRowsV1011(state.datasets[item.datasetId], result, horizon, id); save(); return render();
+  }
+  if (isForecastingV10() && name === 'test-forecast-api-v10') {
+    const item = experiment(), config = [...state.apiConfigs].reverse().find(entry => entry.experimentId === item.id), result = forecastSavedResultV1011(item, config?.resultId || item.selected), horizon = Number(app.querySelector('[data-forecast-api-horizon]')?.value), key = config?.id || `${item.id}:${result.id}`;
+    if (!Number.isInteger(horizon) || horizon < 1 || horizon > result.forecast.length) return toast(`预测期数请输入 1–${result.forecast.length}。`, 'warning');
+    const rows = forecastApiDefaultRowsV1011(dataset(), result, horizon, key), inputs = [...app.querySelectorAll('[data-forecast-api-feature-row]')], invalid = [];
+    inputs.forEach(input => { const rowIndex = Number(input.dataset.forecastApiFeatureRow), name = input.dataset.forecastApiFeatureName, column = dataset().columns.find(item => item.name === name), value = input.value.trim(), bad = !value || (column?.type === 'number' && !Number.isFinite(Number(value))); input.classList.toggle('range-invalid', bad); input.setAttribute('aria-invalid', String(bad)); if (bad) invalid.push(input); else rows[rowIndex].values[name] = column?.type === 'number' ? Number(value) : value; });
+    if (invalid.length) { invalid[0].focus(); return toast('请填写每个未来日期的全部外部特征。', 'warning'); }
+    state.forecastApiInputsV1011[key] = cloneV7(rows); state.forecastApiResponsesV1011 ||= {}; state.forecastApiResponsesV1011[key] = forecastApiResponseForRowsV1011(result, rows); if (config) config.horizon = horizon; save(); render(); return setTimeout(() => toast('模拟请求已完成。', 'success'), 0);
+  }
+  return actionBeforeForecastV1011(name);
+};
+
+const bindBeforeForecastV1011 = bind;
+bind = function () {
+  bindBeforeForecastV1011();
+  if (!isForecastingV10()) return;
+  app.querySelectorAll('[data-forecast-threshold]').forEach(input => input.addEventListener('input', () => forecastThresholdFeedbackV1011(input)));
+  app.querySelector('[data-forecast-api-horizon]')?.addEventListener('change', event => {
+    const item = experiment(), config = [...state.apiConfigs].reverse().find(entry => entry.experimentId === item.id), result = forecastSavedResultV1011(item, config?.resultId || item.selected), value = Number(event.target.value);
+    if (!Number.isInteger(value) || value < 1 || value > result.forecast.length) { toast(`预测期数请输入 1–${result.forecast.length}。`, 'warning'); return render(); }
+    if (config) config.horizon = value; state.forecastApiResponsesV1011 ||= {}; delete state.forecastApiResponsesV1011[config?.id || `${item.id}:${result.id}`]; save(); render();
+  });
+};
+
+Object.values(state.datasets).forEach(set => ensureForecastDatasetV10(set));
+save();
+history.replaceState(null, '', routeHashV910());
+render();
+
+// ============================================================================
+// V10.1.0 — external forecasting features and shared result-table layout
+// ============================================================================
+function forecastPearsonV101(first, second) {
+  if (first.length < 3 || first.length !== second.length) return null;
+  const firstMean = first.reduce((sum, value) => sum + value, 0) / first.length, secondMean = second.reduce((sum, value) => sum + value, 0) / second.length;
+  let numerator = 0, firstSquare = 0, secondSquare = 0;
+  first.forEach((value, index) => { const firstDelta = value - firstMean, secondDelta = second[index] - secondMean; numerator += firstDelta * secondDelta; firstSquare += firstDelta ** 2; secondSquare += secondDelta ** 2; });
+  const denominator = Math.sqrt(firstSquare * secondSquare);
+  return denominator ? numerator / denominator : 0;
+}
+
+function forecastHistoryContextV101(set) {
+  const times = forecastValuesV10(set, set.timeColumn), targets = forecastValuesV10(set, set.target), rows = times.map((value, index) => ({ index, timestamp: parseForecastDateV10(value), rawTarget: targets[index], target: Number(targets[index]) }));
+  const validTargetRows = rows.filter(row => Number.isFinite(row.timestamp) && String(row.rawTarget ?? '').trim() && Number.isFinite(row.target));
+  const cutoff = validTargetRows.length ? Math.max(...validTargetRows.map(row => row.timestamp)) : NaN;
+  return { rows, cutoff, historyRows: rows.filter(row => Number.isFinite(row.timestamp) && row.timestamp <= cutoff), futureRows: rows.filter(row => Number.isFinite(row.timestamp) && row.timestamp > cutoff) };
+}
+
+forecastSummaryV10 = function (set) {
+  const times = forecastValuesV10(set, set.timeColumn), targets = forecastValuesV10(set, set.target), context = forecastHistoryContextV101(set);
+  const validTimes = times.map(parseForecastDateV10).filter(Number.isFinite).sort((a, b) => a - b), uniqueTimes = [...new Set(validTimes)], inferred = inferForecastFrequencyV10(times), frequency = set.frequency || inferred;
+  const invalidTimeCount = Math.max(0, times.length - validTimes.length), duplicateCount = Math.max(0, validTimes.length - uniqueTimes.length);
+  const invalidTargetCount = context.historyRows.filter(row => String(row.rawTarget ?? '').trim() && !Number.isFinite(row.target)).length;
+  const missingTargetCount = context.historyRows.filter(row => !String(row.rawTarget ?? '').trim()).length;
+  let missingPointCount = 0;
+  if (uniqueTimes.length > 1) { const available = new Set(uniqueTimes); for (let cursor = addForecastStepV10(uniqueTimes[0], frequency); cursor < uniqueTimes.at(-1); cursor = addForecastStepV10(cursor, frequency)) { if (!available.has(cursor)) missingPointCount += 1; if (missingPointCount > 10000) break; } }
+  const minimum = FORECAST_FREQUENCIES_V10[frequency]?.min || 60, validPoints = context.historyRows.filter(row => String(row.rawTarget ?? '').trim() && Number.isFinite(row.target)).length, blockers = [];
+  if (invalidTimeCount) blockers.push(`${invalidTimeCount} 个时间值无法解析`);
+  if (duplicateCount) blockers.push(`${duplicateCount} 个重复时间点`);
+  if (invalidTargetCount) blockers.push(`${invalidTargetCount} 个历史目标值不是数值`);
+  if (missingTargetCount && set.forecastConfig?.missingTargetPolicy === 'pending') blockers.push(`${missingTargetCount} 个历史目标值尚未选择处理方式`);
+  if (missingPointCount && set.forecastConfig?.missingTimePolicy === 'pending') blockers.push(`${missingPointCount} 个缺失时间点尚未选择处理方式`);
+  if (validPoints < minimum) blockers.push(`有效历史时间点少于 ${minimum} 个`);
+  if (!Number.isFinite(context.cutoff)) blockers.push('没有可训练的历史目标值');
+  return { inferred, frequency, invalidTimeCount, duplicateCount, invalidTargetCount, missingTargetCount, missingPointCount, validPoints, minimum, start: context.historyRows[0]?.timestamp, end: context.cutoff, totalEnd: uniqueTimes.at(-1), futureRows: context.futureRows.length, blockers };
+};
+
+function forecastExternalColumnsV101(set) { return set.columns.filter(column => column.name !== set.timeColumn && column.name !== set.target && !column.target); }
+function forecastFeatureStatsV101(set, column) {
+  const context = forecastHistoryContextV101(set), values = forecastValuesV10(set, column.name), targets = forecastValuesV10(set, set.target), historyIndexes = context.historyRows.map(row => row.index), historyRaw = historyIndexes.map(index => values[index]), historyNonempty = historyRaw.filter(value => String(value ?? '').trim());
+  const missingRate = 1 - historyNonempty.length / Math.max(1, historyRaw.length), numericValues = historyRaw.map(Number).filter(Number.isFinite);
+  let variance = null;
+  if (column.type === 'number' && numericValues.length) { const min = Math.min(...numericValues), max = Math.max(...numericValues), normalized = numericValues.map(value => max === min ? 0 : (value - min) / (max - min)), mean = normalized.reduce((sum, value) => sum + value, 0) / normalized.length; variance = normalized.reduce((sum, value) => sum + (value - mean) ** 2, 0) / normalized.length; }
+  let temporalCorrelation = null, bestLag = null;
+  if (column.type === 'number') {
+    const maximumLag = Math.min(14, Math.max(0, Math.floor(historyIndexes.length / 4)));
+    for (let lag = 0; lag <= maximumLag; lag += 1) {
+      const featureSeries = [], targetSeries = [];
+      for (let position = lag; position < historyIndexes.length; position += 1) { const featureValue = Number(values[historyIndexes[position - lag]]), targetValue = Number(targets[historyIndexes[position]]); if (Number.isFinite(featureValue) && Number.isFinite(targetValue)) { featureSeries.push(featureValue); targetSeries.push(targetValue); } }
+      const score = forecastPearsonV101(featureSeries, targetSeries); if (score !== null && (temporalCorrelation === null || Math.abs(score) > Math.abs(temporalCorrelation))) { temporalCorrelation = score; bestLag = lag; }
+    }
+  }
+  const timeValues = forecastValuesV10(set, set.timeColumn), byTime = new Map(timeValues.map((value, index) => [parseForecastDateV10(value), values[index]])), horizon = set.forecastConfig.horizon, futureValues = [];
+  for (let step = 1; step <= horizon; step += 1) futureValues.push(byTime.get(addForecastStepV10(context.cutoff, set.frequency, step)));
+  const futureComplete = futureValues.filter(value => String(value ?? '').trim()).length, futureCoverage = futureComplete / Math.max(1, horizon) * 100;
+  return { missingRate, variance, temporalCorrelation, bestLag, futureCoverage, futureMissing: horizon - futureComplete, trainable: !['text', 'date'].includes(column.type) };
+}
+
+ensureForecastDatasetV10 = function (set) {
+  if (!set || !isForecastingV10(state.projects.find(owner => owner.id === set.projectId))) return set;
+  set.timeColumn ||= set.columns.find(column => column.type === 'date')?.name || set.columns[0]?.name;
+  set.target ||= set.columns.find(column => column.type === 'number' && column.name !== set.timeColumn)?.name || set.columns.at(-1)?.name;
+  set.frequency ||= inferForecastFrequencyV10(forecastValuesV10(set, set.timeColumn)); set.feature ||= { revision: 1 }; set.forecastConfig ||= {};
+  set.forecastConfig.horizon = Math.max(1, Number(set.forecastConfig.horizon || 7)); set.forecastConfig.backtestRounds = 3; set.forecastConfig.missingTimePolicy ||= 'pending'; set.forecastConfig.missingTargetPolicy ||= 'pending'; set.forecastConfig.calendarFeatures = set.forecastConfig.calendarFeatures !== false;
+  set.forecastFeatureThresholds ||= { missing: 90, variance: .01, futureCoverage: 80 }; set.forecastFuturePolicies ||= {};
+  set.columns.forEach(column => { column.target = column.name === set.target; if (column.name === set.timeColumn || column.target) { column.included = false; column.trainable = false; return; } column.trainable = !['text', 'date'].includes(column.type); if (column.included === undefined) column.included = column.trainable; });
+  set.timeSummary = forecastSummaryV10(set);
+  const targetColumn = set.columns.find(column => column.name === set.target), historyCount = forecastHistoryContextV101(set).historyRows.length;
+  if (targetColumn) targetColumn.missing = set.timeSummary.missingTargetCount / Math.max(1, historyCount);
+  forecastExternalColumnsV101(set).forEach(column => {
+    column.forecastMeta = forecastFeatureStatsV101(set, column);
+    if (column.forecastMeta.futureCoverage < 100) {
+      if (!['recent', 'linear', 'zero'].includes(set.forecastFuturePolicies[column.name])) set.forecastFuturePolicies[column.name] = 'pending';
+      if (set.forecastFuturePolicies[column.name] === 'pending') column.included = false;
+    } else set.forecastFuturePolicies[column.name] = 'none';
+  });
+  return set;
+};
+
+createForecastExampleV10 = function () {
+  const owner = project(), id = uid('d'), start = Date.UTC(2025, 4, 1), preview = [], dates = [], sales = [], prices = [], promotions = [], advertising = [], holidays = [];
+  for (let index = 0; index < 372; index += 1) {
+    const timestamp = start + index * 86400000, date = new Date(timestamp), weekend = [0, 6].includes(date.getUTCDay()), promotion = index % 19 < 3 || weekend, holiday = index % 61 === 0 ? '节假日' : '普通日', price = +(13.8 + 1.1 * Math.sin(index * Math.PI * 2 / 45) - (promotion ? 1.2 : 0)).toFixed(2), ad = +(20 + 8 * Math.sin(index * Math.PI * 2 / 28) + (promotion ? 12 : 0)).toFixed(1);
+    const target = index < 365 ? Math.round(92 + index * .05 + 10 * Math.sin(index * Math.PI * 2 / 7) - price * 2.1 + (promotion ? 19 : 0) + ad * .32 + (holiday === '节假日' ? 12 : 0) + ((index * 17) % 9 - 4) * .6) : '';
+    const dateText = formatForecastDateV10(timestamp); dates.push(dateText); sales.push(target); prices.push(price); promotions.push(promotion ? '是' : '否'); advertising.push(ad); holidays.push(holiday); preview.push([dateText, target, price, promotion ? '是' : '否', ad, holiday]);
+  }
+  const columns = [
+    { name: '日期', type: 'date', missing: 0, unique: 372, trainable: false, included: false },
+    { name: '销量', type: 'number', missing: 0, unique: new Set(sales.filter(value => value !== '')).size, trainable: false, target: true, included: false },
+    { name: '商品价格', type: 'number', missing: 0, unique: new Set(prices).size, trainable: true, included: true },
+    { name: '是否促销', type: 'boolean', missing: 0, unique: 2, trainable: true, included: true },
+    { name: '广告费用', type: 'number', missing: 0, unique: new Set(advertising).size, trainable: true, included: true },
+    { name: '节假日类型', type: 'category', missing: 0, unique: 2, trainable: true, included: true }
+  ];
+  const set = { id, projectId: owner.id, name: '商品每日销量示例', uploadedAt: now(), rows: 372, timeColumn: '日期', target: '销量', frequency: 'day', columns, preview: preview.slice(0, 150), forecastValues: { 日期: dates, 销量: sales, 商品价格: prices, 是否促销: promotions, 广告费用: advertising, 节假日类型: holidays }, experiments: [], feature: { revision: 1 }, forecastConfig: { horizon: 7, backtestRounds: 3, missingTimePolicy: 'none', missingTargetPolicy: 'none', calendarFeatures: true }, forecastFeatureThresholds: { missing: 90, variance: .01, futureCoverage: 80 }, forecastFuturePolicies: { 商品价格: 'none', 是否促销: 'none', 广告费用: 'none', 节假日类型: 'none' }, dataSource: 'example-v101' };
+  ensureForecastDatasetV10(set); state.datasets[id] = set; owner.datasets.push(id); owner.updatedAt = now(); state.datasetId = id; state.featureStep = 0; state.previewPagesV910[id] = 0; save(); go('dataset'); setTimeout(() => toast('已创建包含外部特征和未来 7 天计划数据的销量示例。', 'success'), 0);
+};
+
+buildForecastCsvDatasetV10 = function (rows, name) {
+  if (rows.length < 2) throw new Error('CSV 至少需要表头和一行数据。'); if (rows.length - 1 > 5000) throw new Error('时序前端演示最多支持 5,000 个时间点。');
+  const headers = rows[0].map(value => String(value).trim()); if (!headers.every(Boolean) || new Set(headers).size !== headers.length) throw new Error('CSV 表头不能为空或重复。');
+  const data = rows.slice(1).filter(row => row.some(value => String(value ?? '').trim()));
+  const columns = headers.map((header, index) => { const values = data.map(row => String(row[index] ?? '').trim()), nonempty = values.filter(Boolean), dateRate = nonempty.filter(value => Number.isFinite(parseForecastDateV10(value))).length / Math.max(1, nonempty.length), numberRate = nonempty.filter(value => Number.isFinite(Number(value))).length / Math.max(1, nonempty.length), unique = new Set(nonempty).size; const type = dateRate >= .9 ? 'date' : numberRate >= .9 ? 'number' : unique <= Math.max(20, nonempty.length * .1) ? (unique === 2 ? 'boolean' : 'category') : 'text'; return { name: header, type, missing: 1 - nonempty.length / Math.max(1, data.length), unique, trainable: !['text', 'date'].includes(type), included: !['text', 'date'].includes(type) }; });
+  const timeColumn = columns.find(column => column.type === 'date')?.name || headers[0], numericCandidates = columns.filter(column => column.type === 'number' && column.name !== timeColumn), target = numericCandidates.at(-1)?.name;
+  if (!target) throw new Error('未识别到可用的数值目标列，请检查 CSV。'); columns.find(column => column.name === target).target = true; columns.find(column => column.name === target).included = false;
+  const forecastValues = Object.fromEntries(headers.map((header, index) => [header, data.map(row => row[index] ?? '')])), id = uid('d');
+  return ensureForecastDatasetV10({ id, projectId: project().id, name: name.replace(/\.csv$/i, ''), uploadedAt: now(), rows: data.length, timeColumn, target, frequency: inferForecastFrequencyV10(forecastValues[timeColumn]), columns, preview: data.slice(0, 150), forecastValues, experiments: [], feature: { revision: 1 }, forecastConfig: { horizon: 7, backtestRounds: 3, missingTimePolicy: 'pending', missingTargetPolicy: 'pending', calendarFeatures: true }, forecastFeatureThresholds: { missing: 90, variance: .01, futureCoverage: 80 }, forecastFuturePolicies: {}, dataSource: 'upload' });
+};
+
+function forecastFuturePreviewV101(set) {
+  const context = forecastHistoryContextV101(set), columns = [set.timeColumn, set.target, ...forecastExternalColumnsV101(set).map(column => column.name)], horizon = Math.max(1, Number(set.forecastConfig.horizon)), rows = context.futureRows.slice(0, horizon);
+  if (!rows.length) return `<section class="section-block forecast-future-preview-v101"><div class="section-title"><div><h2>未来特征数据</h2><p>当前文件只包含历史数据；实际预测时需补充已选择外部特征的未来值。</p></div><span class="status muted">尚未提供</span></div></section>`;
+  return `<section class="section-block forecast-future-preview-v101"><div class="section-title"><div><h2>未来特征数据</h2><p>目标列留空表示待预测；其他列是模型预测时可使用的未来已知信息。</p></div><span class="status good">已提供 ${rows.length} 期</span></div><div class="table-card"><table><thead><tr>${columns.map(name => `<th>${esc(name)}${name === set.target ? '（待预测）' : ''}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(name => `<td>${name === set.target ? '<span class="status muted">待预测</span>' : esc(forecastValuesV10(set, name)[row.index] ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody></table></div></section>`;
+}
+
+const forecastDatasetPageBeforeV101 = forecastDatasetPageV10;
+forecastDatasetPageV10 = function () {
+  const set = ensureForecastDatasetV10(dataset()), summary = set.timeSummary, external = forecastExternalColumnsV101(set), content = forecastDatasetPageBeforeV101();
+  const overview = `<div class="forecast-summary-strip-v101"><span><b>${summary.validPoints}</b>历史训练点</span><span><b>${summary.futureRows}</b>未来数据点</span><span><b>${external.length}</b>外部特征</span><span><b>1</b>预测目标</span></div>`;
+  return content
+    .replace('· 单序列时序预测', '· 单序列、多变量时序预测')
+    .replace('<div class="forecast-summary-strip-v10">', `${overview}<div class="forecast-summary-strip-v10">`)
+    .replace('目标列缺失', '历史目标缺失')
+    .replace(previewSectionV910(set), `${forecastFuturePreviewV101(set)}${previewSectionV910(set)}`);
+};
+
+function forecastCorrelationMatrixV101(set, columns) {
+  const numeric = columns.filter(column => column.type === 'number').slice(0, 8), context = forecastHistoryContextV101(set);
+  if (numeric.length < 2) return `<div class="notice"><b>特征相关性热力图</b><span>至少需要两个数值型外部特征才能计算。</span></div>`;
+  const values = Object.fromEntries(numeric.map(column => [column.name, forecastValuesV10(set, column.name)]));
+  const score = (first, second) => { const x = [], y = []; context.historyRows.forEach(row => { const a = Number(values[first][row.index]), b = Number(values[second][row.index]); if (Number.isFinite(a) && Number.isFinite(b)) { x.push(a); y.push(b); } }); return forecastPearsonV101(x, y) ?? 0; };
+  return `<details class="forecast-correlation-v101"><summary>查看特征相关性热力图</summary><p>仅显示数值型外部特征，颜色越深表示线性相关越强。</p><div class="forecast-correlation-scroll-v101"><table><thead><tr><th></th>${numeric.map(column => `<th>${esc(column.name)}</th>`).join('')}</tr></thead><tbody>${numeric.map(first => `<tr><th>${esc(first.name)}</th>${numeric.map(second => { const value = first === second ? 1 : score(first.name, second.name), strength = Math.max(.08, Math.abs(value)), color = strength >= .55 ? '#fff' : '#173259'; return `<td style="--corr:${strength.toFixed(2)};color:${color}" title="${esc(first.name)} × ${esc(second.name)}：${value.toFixed(2)}">${value.toFixed(2)}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div></details>`;
+}
+
+function forecastPolicyOptionsV101(column, value) {
+  const numeric = column.type === 'number';
+  return `<select data-forecast-future-policy="${esc(column.name)}" name="forecast-future-policy-${esc(column.name)}" aria-label="${esc(column.name)}的未来缺失处理方式" autocomplete="off"><option value="pending" ${value === 'pending' ? 'selected' : ''}>请选择处理方式</option><option value="recent" ${value === 'recent' ? 'selected' : ''}>沿用最近值</option>${numeric ? `<option value="linear" ${value === 'linear' ? 'selected' : ''}>线性延伸</option>` : ''}<option value="zero" ${value === 'zero' ? 'selected' : ''}>使用默认值</option></select>`;
+}
+
+const forecastFeaturePageBeforeV101 = forecastFeaturePageV10;
+forecastFeaturePageV10 = function () {
+  const set = ensureForecastDatasetV10(dataset()), step = Number(state.featureStep || 0) > 0 ? 1 : 0;
+  if (!step) return forecastFeaturePageBeforeV101();
+  const columns = forecastExternalColumnsV101(set), thresholds = set.forecastFeatureThresholds, included = columns.filter(column => column.included).length;
+  const rows = columns.map(column => {
+    const meta = column.forecastMeta || forecastFeatureStatsV101(set, column), passesMissing = meta.missingRate * 100 <= thresholds.missing, passesVariance = meta.variance === null || meta.variance >= thresholds.variance, passesFuture = meta.futureCoverage >= thresholds.futureCoverage, policy = set.forecastFuturePolicies[column.name] || 'pending', policyReady = meta.futureCoverage >= 100 || policy !== 'pending', recommended = meta.trainable && passesMissing && passesVariance && passesFuture && policyReady;
+    const status = !meta.trainable ? ['不可用于训练', 'blocked'] : column.included ? ['已纳入', 'good'] : !policyReady ? ['待处理未来缺失', 'blocked'] : recommended ? ['手动排除', 'muted'] : ['建议排除', 'blocked'];
+    return `<tr><td><label class="forecast-feature-check-v101"><input type="checkbox" data-forecast-feature-toggle="${esc(column.name)}" name="forecast-feature-${esc(column.name)}" aria-label="纳入外部特征${esc(column.name)}" ${column.included ? 'checked' : ''} ${meta.trainable ? '' : 'disabled'}><span aria-hidden="true"></span></label></td><td><b>${esc(column.name)}</b><small>上传字段</small></td><td>${typeLabel(column.type)}</td><td class="forecast-number-cell-v101 ${passesMissing ? '' : 'threshold-failed'}">${(meta.missingRate * 100).toFixed(1)}%</td><td class="forecast-number-cell-v101 ${passesVariance ? '' : 'threshold-failed'}"><span title="${meta.variance === null ? '类别或布尔特征不计算数值方差' : '基于历史区间 Min-Max 归一化后计算'}">${meta.variance === null ? '不适用' : meta.variance.toFixed(3)}</span></td><td class="forecast-number-cell-v101"><span title="${meta.temporalCorrelation === null ? '仅数值特征计算时序相关性' : '历史区间内绝对相关性最高的同期或滞后结果'}">${meta.temporalCorrelation === null ? '不适用' : `${meta.temporalCorrelation.toFixed(2)}<small>${meta.bestLag ? `滞后 ${meta.bestLag} 期` : '同期'}</small>`}</span></td><td class="forecast-number-cell-v101 ${passesFuture ? '' : 'threshold-failed'}">${meta.futureCoverage.toFixed(0)}%</td><td>${meta.futureCoverage < 100 ? forecastPolicyOptionsV101(column, policy) : '<span class="status good">未来值完整</span>'}</td><td><span class="status ${status[1]}">${status[0]}</span></td></tr>`;
+  }).join('');
+  const body = `<section class="panel"><div class="panel-head"><div><h2>特征管理</h2><p>筛选上传的外部特征；滞后、滚动、趋势和差分仍由模型训练时自动处理。</p></div><span class="status good">已纳入 ${included} 个</span></div>
+    <div class="calendar-toggle-v10"><div><b>自动生成日历特征</b><span>根据时间列生成星期、月份、季度、周末等特征，不修改原始数据。</span></div><label class="switch"><input type="checkbox" data-forecast-calendar ${set.forecastConfig.calendarFeatures ? 'checked' : ''}><span></span></label></div>
+    <div class="forecast-calendar-list-v10">${forecastCalendarLabelsV10(set.frequency).map(label => `<span class="${set.forecastConfig.calendarFeatures ? '' : 'disabled'}">${label}</span>`).join('')}</div>
+    <div class="forecast-thresholds-v101"><label><span>历史缺失率超过</span><span class="threshold-input-wrap-v101"><input data-forecast-threshold="missing" name="forecast-threshold-missing" autocomplete="off" type="number" min="0" max="99" step="1" value="${thresholds.missing}"><i aria-hidden="true">%</i></span></label><label><span>归一化方差低于</span><input data-forecast-threshold="variance" name="forecast-threshold-variance" autocomplete="off" type="number" min="0" max="0.25" step="0.001" value="${thresholds.variance}"></label><label><span>未来覆盖率低于</span><span class="threshold-input-wrap-v101"><input data-forecast-threshold="futureCoverage" name="forecast-threshold-future-coverage" autocomplete="off" type="number" min="0" max="100" step="1" value="${thresholds.futureCoverage}"><i aria-hidden="true">%</i></span></label><div>${button('恢复推荐值', 'forecast-recommend-thresholds-v101')}${button('应用筛选', 'forecast-apply-thresholds-v101', 'primary')}</div></div>
+    <div class="notice"><b>筛选规则</b><span>历史缺失率、归一化方差和未来覆盖率用于自动筛选；时序相关性只作参考，不自动剔除。未来覆盖率默认要求 80%，不足时可选择填补策略后手动纳入。</span></div>
+    <div class="table-card forecast-feature-table-wrap-v101"><table class="forecast-feature-table-v101"><thead><tr><th>纳入</th><th>特征</th><th>类型</th><th>历史缺失率</th><th>归一化方差</th><th>时序相关性</th><th>未来覆盖率</th><th>未来缺失处理</th><th>状态</th></tr></thead><tbody>${rows || '<tr><td colspan="9"><div class="empty-state"><p>没有可作为外部特征的字段。</p></div></td></tr>'}</tbody></table></div>
+    ${forecastCorrelationMatrixV101(set, columns)}</section>`;
+  return shell(`${steps('feature')}${pageHead('特征准备', `${esc(set.name)} · 管理日历与外部特征`)}<div class="forecast-feature-tabs-v10"><button data-forecast-feature-step="0"><i>1</i>时间与回测</button><button data-forecast-feature-step="1" class="active"><i>2</i>特征管理</button></div>${body}`);
+};
+
+function forecastSelectedFeaturesV101(set = dataset()) { return forecastExternalColumnsV101(ensureForecastDatasetV10(set)).filter(column => column.trainable && column.included); }
+function forecastUsesExternalV101(type) { return ['forecast_arima', 'forecast_prophet', 'forecast_lgbm'].includes(type); }
+function forecastDisplayModelNameV101(type, set = dataset()) { return type === 'forecast_arima' && forecastSelectedFeaturesV101(set).length ? 'ARIMAX' : modelName(type); }
+
+forecastProcessingSummaryV10 = function (type) {
+  const set = ensureForecastDatasetV10(dataset()), selected = forecastSelectedFeaturesV101(set), names = selected.map(column => column.name), usesExternal = forecastUsesExternalV101(type) && names.length;
+  const featureText = usesExternal ? names.join('、') : type === 'forecast_baseline' || type === 'forecast_ets' ? '该模型仅使用目标历史，不读取外部特征' : '当前未纳入外部特征';
+  const rows = {
+    forecast_baseline: [['模型比较', '历史均值、最后值、季节性最后值、漂移、移动平均'], ['外部特征', featureText]],
+    forecast_ets: [['模型结构', '水平、趋势与季节性组件'], ['外部特征', featureText]],
+    forecast_arima: [['模型结构', usesExternal ? 'ARIMAX：自回归、差分、移动平均与外部特征' : 'ARIMA：自回归、差分与移动平均'], ['使用特征', featureText], ['自动处理', '仅在每个训练窗口内确定差分与阶数']],
+    forecast_prophet: [['模型结构', '趋势、季节性、日历效应与外部回归量'], ['使用特征', featureText], ['自动处理', '自动设置变点范围与季节性']],
+    forecast_lgbm: [['模型输入', '目标滞后、滚动统计、趋势序号、日历特征与外部特征'], ['使用特征', featureText], ['自动处理', '每轮回测只使用当时已知的信息生成特征']]
+  }[type] || [];
+  return `<div class="forecast-processing-v10">${rows.map(row => `<div><b>${row[0]}</b><span>${esc(row[1])}</span></div>`).join('')}</div>`;
+};
+
+forecastModelSelectPageV10 = function () {
+  const set = ensureForecastDatasetV10(dataset()), count = forecastSelectedFeaturesV101(set).length;
+  return shell(`${steps('experiments')}${pageHead('选择预测模型', `当前纳入 ${count} 个外部特征；不同模型按自身能力使用。`)}<div class="model-grid">${FORECAST_MODELS_V10.map(model => { const supports = forecastUsesExternalV101(model[0]), title = model[0] === 'forecast_arima' ? 'ARIMA / ARIMAX' : model[1]; return `<article class="model-card"><span aria-hidden="true">${model[0] === 'forecast_lgbm' ? '⚡' : '◈'}</span><h3>${title}</h3><p>${model[2]}</p><em class="model-feature-badge-v101 ${supports ? 'supports' : ''}">${supports ? '支持外部特征' : '仅使用目标历史'}</em>${button('创建此模型实验', `add-forecast-model-v10:${model[0]}`, 'primary')}</article>`; }).join('')}</div>`);
+};
+
+const forecastExperimentPageBeforeV101 = forecastExperimentPageV10;
+forecastExperimentPageV10 = function () {
+  const item = experiment(), set = ensureForecastDatasetV10(dataset()), displayName = forecastDisplayModelNameV101(item.type, set), selected = forecastSelectedFeaturesV101(set), content = forecastExperimentPageBeforeV101();
+  const summary = `<div class="notice ${forecastUsesExternalV101(item.type) && selected.length ? 'success' : ''}"><b>外部特征</b><span>${forecastUsesExternalV101(item.type) ? (selected.length ? `训练将使用：${selected.map(column => esc(column.name)).join('、')}` : '当前未纳入外部特征，将按单变量模式训练。') : '该模型作为目标历史基准，不使用外部特征。'}</span></div>`;
+  return content.replace(`${modelName(item.type)} ·`, `${displayName} ·`).replace('<h3>模型自动处理</h3>', `${summary}<h3>模型自动处理</h3>`);
+};
+
+const makeForecastResultBeforeV101 = makeForecastResultV10;
+makeForecastResultV10 = function (item, variant, index) {
+  const set = ensureForecastDatasetV10(state.datasets[item.datasetId]), selected = forecastSelectedFeaturesV101(set), usesExternal = forecastUsesExternalV101(item.type) && selected.length > 0, result = makeForecastResultBeforeV101(item, variant, index);
+  result.modelDisplayName = forecastDisplayModelNameV101(item.type, set); result.externalFeatures = usesExternal ? selected.map(column => column.name) : []; result.ignoredExternalFeatures = usesExternal ? [] : selected.map(column => column.name);
+  result.featureContributions = usesExternal ? selected.map((column, position) => ({ name: column.name, role: column.forecastMeta?.bestLag ? `滞后 ${column.forecastMeta.bestLag} 期相关` : '同期相关', importance: +(Math.max(.08, .34 - position * .055)).toFixed(3) })) : [];
+  if (!usesExternal) return result;
+  const improvement = Math.max(.78, 1 - Math.min(.18, selected.length * .035));
+  result.backtests = result.backtests.map(round => { const predicted = round.predicted.map((point, pointIndex) => ({ ...point, value: +(round.actual[pointIndex].value + (point.value - round.actual[pointIndex].value) * improvement).toFixed(2) })), metrics = forecastMetricsV10(round.actual.map(point => point.value), predicted.map(point => point.value)); return { ...round, predicted, ...metrics }; });
+  const maes = result.backtests.map(round => round.mae), average = values => values.reduce((sum, value) => sum + value, 0) / values.length;
+  result.mae = +average(maes).toFixed(2); result.rmse = +average(result.backtests.map(round => round.rmse)).toFixed(2); result.smape = +average(result.backtests.map(round => round.smape)).toFixed(1); result.stability = +Math.sqrt(maes.reduce((sum, value) => sum + (value - result.mae) ** 2, 0) / maes.length).toFixed(2);
+  const context = forecastHistoryContextV101(set), timeValues = forecastValuesV10(set, set.timeColumn), timeIndex = new Map(timeValues.map((value, position) => [parseForecastDateV10(value), position]));
+  result.forecast = result.forecast.map((point, pointIndex) => { let influence = 0; selected.forEach((column, columnIndex) => { const raw = forecastValuesV10(set, column.name)[timeIndex.get(point.timestamp)], numeric = Number(raw); influence += Number.isFinite(numeric) ? Math.sin(numeric * .13 + columnIndex) * .45 : ((forecastHashV10(raw || column.name) % 11) - 5) * .08; }); const prediction = +(point.prediction + influence).toFixed(2), shift = prediction - point.prediction; return { ...point, prediction, lower80: +(point.lower80 + shift).toFixed(2), upper80: +(point.upper80 + shift).toFixed(2), lower95: +(point.lower95 + shift).toFixed(2), upper95: +(point.upper95 + shift).toFixed(2) }; });
+  result.externalFeatureCutoff = formatForecastDateV10(context.cutoff, set.frequency); return result;
+};
+
+const forecastReportPageBeforeV101 = forecastReportPageV10;
+forecastReportPageV10 = function () {
+  const item = experiment(), set = ensureForecastDatasetV10(dataset()), result = forecastReportRenderResultV1011 || item?.results?.find(row => row.id === item.selected) || item?.results?.[0], content = forecastReportPageBeforeV101();
+  if (!result) return content;
+  const names = result.externalFeatures || [], usesExternal = names.length > 0, title = forecastDisplayModelNameV101(item.type, set);
+  const contribution = `<section class="section-block forecast-feature-report-v101"><div class="section-title"><div><h2>外部特征使用情况</h2><p>展示本次训练快照中实际进入模型的上传字段。</p></div><span>${esc(title)}</span></div>${usesExternal ? `<div class="forecast-report-feature-list-v101">${result.featureContributions.map(feature => `<div><b>${esc(feature.name)}</b><span>${esc(feature.role)}</span><strong>${feature.importance.toFixed(3)}</strong></div>`).join('')}</div><div class="notice success"><b>参与训练</b><span>${names.map(esc).join('、')} 已用于回测与未来预测。</span></div>` : `<div class="notice"><b>未使用外部特征</b><span>${forecastUsesExternalV101(item.type) ? '本次训练没有纳入外部特征。' : '该模型仅使用目标列历史数据，适合作为比较基准。'}</span></div>`}</section>`;
+  return content
+    .replace(`<span>${modelName(item.type)}</span>`, `<span>${esc(title)}</span>`)
+    .replace(`<code>模型：${esc(modelName(item.type))}</code>`, `<code>模型：${esc(title)}</code><code>外部特征：${usesExternal ? names.map(esc).join('、') : '未使用'}</code>`)
+    .replace('<section class="section-block"><div class="section-title"><h2>模型说明</h2>', `${contribution}<section class="section-block"><div class="section-title"><h2>模型说明</h2>`);
+};
+
+const forecastTuningPageBeforeV101 = forecastTuningPageV10;
+forecastTuningPageV10 = function () {
+  return forecastTuningPageBeforeV101()
+    .replace('<div class="table-card forecast-table-scroll-v10"><table class="forecast-result-table-v10">', '<div class="table-card forecast-table-scroll-v10 forecast-table-scroll-v101"><table class="forecast-result-table-v10 result-table sticky-action-table-v101">')
+    .replace('<th class="compact-col-v10">保存</th>', '<th class="result-save-column-v101">保存</th>')
+    .replace('<th class="compact-col-v10">排名</th>', '<th class="result-rank-column-v101">排名</th>')
+    .replace('<th class="scheme-col-v10">参数方案</th>', '<th class="result-scheme-column-v101">参数方案</th>')
+    .replaceAll('<th><button class="metric-sort-v10"', '<th class="result-metric-column-v101"><button class="metric-sort-v10"')
+    .replace('<th class="action-col-v10">操作</th>', '<th class="result-action-column-v101">操作</th>')
+    .replaceAll('<td><label class="forecast-save-check-v10">', '<td class="result-save-column-v101"><label class="forecast-save-check-v10">')
+    .replace(/<td><b>#(\d+)<\/b><\/td>/g, '<td class="result-rank-column-v101"><b>#$1</b></td>')
+    .replaceAll('<td><b>方案 #', '<td class="result-scheme-column-v101"><b>方案 #')
+    .replace(/<td><b>([\d.]+%?)<\/b><\/td>/g, '<td class="result-metric-column-v101"><b>$1</b></td>')
+    .replaceAll('<td><div class="row-actions">', '<td class="result-action-column-v101"><div class="row-actions">');
+};
+
+const forecastLibraryDetailBeforeV101 = forecastLibraryDetailV10;
+forecastLibraryDetailV10 = function (detail) {
+  return forecastLibraryDetailBeforeV101(detail)
+    .replace('<div class="table-card forecast-table-scroll-v10"><table class="forecast-library-table-v10">', '<div class="table-card forecast-table-scroll-v10 forecast-table-scroll-v101"><table class="forecast-library-table-v10 sticky-action-table-v101">')
+    .replaceAll('<th><button class="metric-sort-v10"', '<th class="result-metric-column-v101"><button class="metric-sort-v10"')
+    .replace('<th class="action-col-v10">操作</th>', '<th class="result-action-column-v101">操作</th>')
+    .replaceAll('<td><b>方案 #', '<td class="library-scheme-column-v101"><b>方案 #')
+    .replace(/<td><b>([\d.]+%?)<\/b><\/td>/g, '<td class="result-metric-column-v101"><b>$1</b></td>')
+    .replaceAll('<td><div class="row-actions">', '<td class="result-action-column-v101"><div class="row-actions">');
+};
+
+const actionBeforeForecastV101 = action;
+action = function (name) {
+  if (isForecastingV10() && name === 'forecast-recommend-thresholds-v101') {
+    const defaults = { missing: 90, variance: .01, futureCoverage: 80 };
+    app.querySelectorAll('[data-forecast-threshold]').forEach(input => { input.value = defaults[input.dataset.forecastThreshold]; input.classList.remove('range-invalid'); });
+    return toast('已填入推荐值，点击“应用筛选”后生效。', 'success');
+  }
+  if (isForecastingV10() && name === 'forecast-apply-thresholds-v101') {
+    const set = ensureForecastDatasetV10(dataset()), inputs = [...app.querySelectorAll('[data-forecast-threshold]')], values = Object.fromEntries(inputs.map(input => [input.dataset.forecastThreshold, Number(input.value)]));
+    let invalid = false; inputs.forEach(input => { const bad = !input.value.trim() || !input.checkValidity(); input.classList.toggle('range-invalid', bad); invalid ||= bad; });
+    if (invalid) return toast('请修正标红的筛选阈值。', 'warning');
+    set.forecastFeatureThresholds = values;
+    forecastExternalColumnsV101(set).forEach(column => { const meta = forecastFeatureStatsV101(set, column), passes = meta.trainable && meta.missingRate * 100 <= values.missing && (meta.variance === null || meta.variance >= values.variance) && meta.futureCoverage >= values.futureCoverage; column.forecastMeta = meta; column.included = passes; });
+    set.feature.revision = (set.feature.revision || 0) + 1; markForecastExperimentsStaleV10(set); save(); render(); return setTimeout(() => toast('已按当前阈值更新外部特征。', 'success'), 0);
+  }
+  if (isForecastingV10() && name === 'save-library-results') {
+    const item = experiment(), selected = [...(state.tuningSelections[item.id] || [])], outcome = actionBeforeForecastV101(name);
+    selected.forEach(resultId => { const result = item.results.find(row => row.id === resultId), snapshot = state.savedResultSnapshots[`${item.id}:${resultId}`]; if (!result || !snapshot?.trainingSnapshot) return; snapshot.trainingSnapshot.schemaVersion = 2; snapshot.trainingSnapshot.externalFeatures = cloneV7(result.externalFeatures || []); snapshot.trainingSnapshot.ignoredExternalFeatures = cloneV7(result.ignoredExternalFeatures || []); snapshot.trainingSnapshot.featureContributions = cloneV7(result.featureContributions || []); snapshot.trainingSnapshot.featureThresholds = cloneV7(state.datasets[item.datasetId]?.forecastFeatureThresholds || {}); snapshot.trainingSnapshot.futurePolicies = cloneV7(state.datasets[item.datasetId]?.forecastFuturePolicies || {}); });
+    save(); return outcome;
+  }
+  return actionBeforeForecastV101(name);
+};
+
+const bindBeforeForecastV101 = bind;
+bind = function () {
+  bindBeforeForecastV101();
+  if (!isForecastingV10()) return;
+  const set = ensureForecastDatasetV10(dataset());
+  app.querySelectorAll('[data-forecast-threshold]').forEach(input => input.addEventListener('input', () => input.classList.toggle('range-invalid', !input.value.trim() || !input.checkValidity())));
+  app.querySelectorAll('[data-forecast-feature-toggle]').forEach(input => input.addEventListener('change', event => {
+    const column = forecastExternalColumnsV101(set).find(item => item.name === event.target.dataset.forecastFeatureToggle); if (!column) return;
+    const meta = column.forecastMeta || forecastFeatureStatsV101(set, column), policy = set.forecastFuturePolicies[column.name] || 'pending';
+    if (event.target.checked && meta.futureCoverage < 100 && policy === 'pending') { event.target.checked = false; column.included = false; save(); return toast('请先为该特征选择未来缺失处理方式。', 'warning'); }
+    column.included = event.target.checked; set.feature.revision = (set.feature.revision || 0) + 1; markForecastExperimentsStaleV10(set); save(); render();
+  }));
+  app.querySelectorAll('[data-forecast-future-policy]').forEach(select => select.addEventListener('change', event => { const column = forecastExternalColumnsV101(set).find(item => item.name === event.target.dataset.forecastFuturePolicy); if (!column) return; set.forecastFuturePolicies[column.name] = event.target.value; if (event.target.value === 'pending') column.included = false; set.feature.revision = (set.feature.revision || 0) + 1; markForecastExperimentsStaleV10(set); save(); render(); }));
+};
+
+Object.values(state.datasets).forEach(set => ensureForecastDatasetV10(set));
+save();
+history.replaceState(null, '', routeHashV910());
+render();
+
+// V10.1.1 post-activation: this block intentionally follows every V10.1 override.
+const makeForecastResultBeforePostV1011 = makeForecastResultV10;
+makeForecastResultV10 = function (item, variant, index) { const result = makeForecastResultBeforePostV1011(item, variant, index), set = ensureForecastDatasetV10(state.datasets[item.datasetId]); result.historicalMissingHandling = forecastHistoricalHandlingV1011(set, result.externalFeatures || [], item.type); return result; };
+
+forecastDisplayModelNameV101 = function (type, set = dataset()) { if (forecastReportRenderResultV1011?.modelDisplayName) return forecastReportRenderResultV1011.modelDisplayName; return type === 'forecast_arima' && forecastSelectedFeaturesV101(set).length ? 'ARIMAX' : modelName(type); };
+
+function forecastProcessingSummaryPostV1011(type) {
+  const set = ensureForecastDatasetV10(dataset()), snapshotResult = forecastReportRenderResultV1011, selected = snapshotResult ? (snapshotResult.externalFeatures || []).map(name => set.columns.find(column => column.name === name)).filter(Boolean) : forecastSelectedFeaturesV101(set), names = snapshotResult ? snapshotResult.externalFeatures || [] : selected.map(column => column.name), usesExternal = forecastUsesExternalV101(type) && names.length;
+  const featureText = usesExternal ? names.join('、') : type === 'forecast_baseline' || type === 'forecast_ets' ? '该模型仅使用目标历史，不读取外部特征' : '当前未纳入外部特征', missingHandling = snapshotResult?.historicalMissingHandling || forecastHistoricalHandlingV1011(set, names, type), missingText = !usesExternal ? '不适用' : missingHandling.length ? missingHandling.map(item => `${item.name}：${item.strategy}`).join('；') : '所选外部特征的历史区间无缺失';
+  const rows = { forecast_baseline: [['模型比较', '历史均值、最后值、季节性最后值、漂移、移动平均'], ['外部特征', featureText]], forecast_ets: [['模型结构', '水平、趋势与季节性组件'], ['外部特征', featureText]], forecast_arima: [['模型结构', usesExternal ? 'ARIMAX：自回归、差分、移动平均与外部特征' : 'ARIMA：自回归、差分与移动平均'], ['使用特征', featureText], ['历史缺失处理', missingText], ['自动处理', '仅在每个训练窗口内确定填充值、差分与阶数']], forecast_prophet: [['模型结构', '趋势、季节性、日历效应与外部回归量'], ['使用特征', featureText], ['历史缺失处理', missingText], ['自动处理', '每轮训练窗口单独确定填充值、变点范围与季节性']], forecast_lgbm: [['模型输入', '目标滞后、滚动统计、趋势序号、日历特征与外部特征'], ['使用特征', featureText], ['历史缺失处理', missingText], ['自动处理', '每轮回测只使用当时已知的信息生成特征']] }[type] || [];
+  return `<div class="forecast-processing-v10">${rows.map(row => `<div><b>${row[0]}</b><span>${esc(row[1])}</span></div>`).join('')}</div>`;
+}
+forecastProcessingSummaryV10 = forecastProcessingSummaryPostV1011;
+
+const forecastReportPageBeforePostV1011 = forecastReportPageV10;
+forecastReportPageV10 = function () { const item = experiment(), snapshot = state.savedResultSnapshots?.[state.forecastReportSnapshotKeyV1011]; if (!item || !snapshot?.result || snapshot.experimentId !== item.id) return forecastReportPageBeforePostV1011(); const originalResults = item.results, result = cloneV7(snapshot.result); item.results = [...(originalResults || []).filter(row => row.id !== result.id), result]; forecastReportRenderResultV1011 = result; try { return forecastReportPageBeforePostV1011(); } finally { forecastReportRenderResultV1011 = null; item.results = originalResults; } };
+
+const actionBeforePostV1011 = action;
+action = function (name) {
+  if (isForecastingV10() && name === 'forecast-recommend-thresholds-v101') { const defaults = { missing: 90, variance: .01, futureCoverage: 80 }; app.querySelectorAll('[data-forecast-threshold]').forEach(input => { input.value = defaults[input.dataset.forecastThreshold]; forecastThresholdFeedbackV1011(input); }); return toast('已填入推荐值，点击“应用筛选”后生效。', 'success'); }
+  if (isForecastingV10() && name === 'forecast-apply-thresholds-v101') { const set = ensureForecastDatasetV10(dataset()), inputs = [...app.querySelectorAll('[data-forecast-threshold]')], valid = inputs.map(forecastThresholdFeedbackV1011); if (valid.some(value => !value)) { inputs[valid.findIndex(value => !value)]?.focus(); return toast('请修正标红的筛选阈值。', 'warning'); } const values = Object.fromEntries(inputs.map(input => [input.dataset.forecastThreshold, Number(input.value)])); set.forecastFeatureThresholds = values; forecastExternalColumnsV101(set).forEach(column => { const meta = forecastFeatureStatsV101(set, column), policyReady = meta.futureCoverage >= 100 || ['recent', 'linear', 'zero'].includes(set.forecastFuturePolicies[column.name]), passes = meta.trainable && meta.missingRate * 100 <= values.missing && (meta.variance === null || meta.variance >= values.variance) && meta.futureCoverage >= values.futureCoverage && policyReady; column.forecastMeta = meta; column.included = passes; }); set.feature.revision = (set.feature.revision || 0) + 1; markForecastExperimentsStaleV10(set); save(); render(); return setTimeout(() => toast('已按当前阈值和缺失策略更新外部特征。', 'success'), 0); }
+  return actionBeforePostV1011(name);
+};
+
+const bindBeforePostV1011 = bind;
+bind = function () { bindBeforePostV1011(); if (!isForecastingV10()) return; app.querySelectorAll('[data-forecast-threshold]').forEach(input => input.addEventListener('input', () => forecastThresholdFeedbackV1011(input))); };
 
 Object.values(state.datasets).forEach(set => ensureForecastDatasetV10(set));
 save();
