@@ -177,6 +177,10 @@ assert.equal(evaluate(`forecastHorizonLimitV102(state.datasets['${forecastDatase
 assert.equal(evaluate(`forecastHorizonValidationV102({...state.datasets['${forecastDatasetId}'],forecastConfig:{...state.datasets['${forecastDatasetId}'].forecastConfig,horizon:91}}).valid`), false);
 evaluate(`state.featureStep=1`);
 const forecastFeatureHtml = evaluate(`featurePage()`);
+assert.match(forecastFeatureHtml, /forecast-calendar-control-v1022/);
+assert.match(forecastFeatureHtml, /已开启/);
+assert.match(forecastFeatureHtml, /自动筛选/);
+assert.doesNotMatch(forecastFeatureHtml, />应用筛选</);
 assert.match(forecastFeatureHtml, /历史缺失率/);
 assert.match(forecastFeatureHtml, /归一化方差/);
 assert.match(forecastFeatureHtml, /时序相关性/);
@@ -190,6 +194,20 @@ assert.equal(evaluate(`forecastFirstTrainingRowsV102(state.datasets['${forecastD
 evaluate(`action('add-forecast-model-v10:forecast_lgbm')`);
 const forecastExperimentId = evaluate(`state.experimentId`);
 assert.ok(forecastExperimentId);
+const forecastExperimentHtml = evaluate(`experimentPage()`);
+assert.match(forecastExperimentHtml, /常用参数/);
+assert.match(forecastExperimentHtml, /树数量/);
+assert.match(forecastExperimentHtml, /学习率/);
+assert.match(forecastExperimentHtml, /自动搜索范围/);
+assert.doesNotMatch(forecastExperimentHtml, /class="advanced"/);
+assert.deepEqual(JSON.parse(JSON.stringify(evaluate(`forecastParameterSchemaV1022('forecast_arima', state.datasets['${forecastDatasetId}']).filter(field=>!field.advanced).map(field=>field.key)`))), ['p', 'd', 'q', 'seasonal']);
+evaluate(`state.experiments['${forecastExperimentId}'].tuning='grid'`);
+const forecastGridHtml = evaluate(`experimentPage()`);
+assert.match(forecastGridHtml, /网格候选值/);
+assert.match(forecastGridHtml, /预计训练 81 组参数组合/);
+assert.equal(evaluate(`forecastGridSummaryV1022(state.experiments['${forecastExperimentId}'], state.datasets['${forecastDatasetId}']).count`), 81);
+assert.equal(evaluate(`forecastGridFieldResultV1022(state.experiments['${forecastExperimentId}'], {key:'depth'}, '0, 6', state.datasets['${forecastDatasetId}']).valid`), false);
+evaluate(`state.experiments['${forecastExperimentId}'].tuning='auto'`);
 evaluate(`state.experiments['${forecastExperimentId}'].results=makeForecastResultsV10(state.experiments['${forecastExperimentId}']); state.experiments['${forecastExperimentId}'].selected=state.experiments['${forecastExperimentId}'].results[0].id; state.experiments['${forecastExperimentId}'].status='completed'; state.tuningSelections['${forecastExperimentId}']=[state.experiments['${forecastExperimentId}'].selected]`);
 assert.equal(evaluate(`state.experiments['${forecastExperimentId}'].results[0].backtests.length`), 3);
 assert.equal(evaluate(`state.experiments['${forecastExperimentId}'].results[0].forecast.length`), 7);
@@ -241,4 +259,4 @@ assert.match(forecastApiHtml, /未来外部特征/);
 assert.match(forecastApiHtml, /请选择/);
 assert.equal(evaluate(`forecastApiRequestV1011(makeForecastResultV10({id:'baseline-api',datasetId:'${forecastDatasetId}',type:'forecast_baseline',parameters:{}},'最后值',0), [{date:'2026-05-01',values:{}}]).futureFeatures`), undefined);
 
-console.log('ML Studio V10.2.1 smoke checks passed.');
+console.log('ML Studio V10.2.2 smoke checks passed.');

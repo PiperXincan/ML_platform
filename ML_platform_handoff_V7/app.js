@@ -4230,7 +4230,6 @@ Object.values(state.datasets).forEach(set => ensureForecastDatasetV10(set));
 save();
 history.replaceState(null, '', routeHashV910());
 render();
-
 // ============================================================================
 // V10.2.0 — forecasting alignment; uploaded files contain historical rows only.
 // ============================================================================
@@ -5054,4 +5053,141 @@ Object.values(state.datasets).forEach(set => ensureForecastDatasetV10(set));
 save();
 history.replaceState(null, '', routeHashV910());
 render();
+// ============================================================================
+// V10.2.2 — calendar control, explicit auto filter and model parameters
+// ============================================================================
+function forecastSeasonPeriodV1022(set = dataset()) { return set.frequency === 'day' ? 7 : set.frequency === 'week' ? 52 : 12; }
+function forecastParameterSchemaV1022(type, set = dataset()) {
+  const season = forecastSeasonPeriodV1022(set);
+  const schemas = {
+    forecast_ets: [
+      { key: 'trend', label: '趋势类型', type: 'select', defaultValue: 'add', options: [['none', '无趋势'], ['add', '加法趋势']], help: '序列是否包含持续上升或下降趋势。' },
+      { key: 'seasonalityMode', label: '季节性类型', type: 'select', defaultValue: 'add', options: [['none', '无季节性'], ['add', '加法季节性'], ['mul', '乘法季节性']], help: '波动幅度稳定时选加法，随水平放大时选乘法。' },
+      { key: 'season', label: '季节周期', type: 'number', defaultValue: season, min: 1, max: 366, step: 1, integer: true, help: `当前频率推荐值：${season}。` },
+      { key: 'damped', label: '阻尼趋势', type: 'boolean', defaultValue: true, help: '避免长期趋势无限延伸。' }
+    ],
+    forecast_arima: [
+      { key: 'p', label: '自回归阶数 p', type: 'number', defaultValue: 2, min: 0, max: 10, step: 1, integer: true, help: '使用多少期历史值解释当前值。' },
+      { key: 'd', label: '差分阶数 d', type: 'number', defaultValue: 1, min: 0, max: 2, step: 1, integer: true, help: '用于消除趋势，通常为 0 或 1。' },
+      { key: 'q', label: '移动平均阶数 q', type: 'number', defaultValue: 1, min: 0, max: 10, step: 1, integer: true, help: '使用多少期历史误差。' },
+      { key: 'seasonal', label: '启用季节项', type: 'boolean', defaultValue: true, help: '对周、月等周期性变化建模。' },
+      { key: 'P', label: '季节自回归 P', type: 'number', defaultValue: 1, min: 0, max: 3, step: 1, integer: true, advanced: true, help: '季节维度的自回归阶数。' },
+      { key: 'D', label: '季节差分 D', type: 'number', defaultValue: 1, min: 0, max: 2, step: 1, integer: true, advanced: true, help: '季节维度的差分阶数。' },
+      { key: 'Q', label: '季节移动平均 Q', type: 'number', defaultValue: 1, min: 0, max: 3, step: 1, integer: true, advanced: true, help: '季节维度的误差阶数。' },
+      { key: 'm', label: '季节周期 m', type: 'number', defaultValue: season, min: 1, max: 366, step: 1, integer: true, advanced: true, help: `当前频率推荐值：${season}。` }
+    ],
+    forecast_prophet: [
+      { key: 'changepoint', label: '趋势灵活度', type: 'number', defaultValue: .05, min: .001, max: .5, step: .001, help: '越大越容易跟随趋势变化，也更容易过拟合。' },
+      { key: 'seasonality', label: '季节性强度', type: 'number', defaultValue: 10, min: .1, max: 30, step: .1, help: '控制季节性曲线的变化幅度。' },
+      { key: 'seasonalityMode', label: '季节性模式', type: 'select', defaultValue: 'additive', options: [['additive', '加法'], ['multiplicative', '乘法']], help: '季节波动随序列水平放大时可选乘法。' }
+    ],
+    forecast_lgbm: [
+      { key: 'trees', label: '树数量', type: 'number', defaultValue: 300, min: 50, max: 1000, step: 10, integer: true, help: '树越多拟合能力越强，训练也更慢。' },
+      { key: 'learningRate', label: '学习率', type: 'number', defaultValue: .05, min: .001, max: .5, step: .001, help: '控制每棵树对最终结果的贡献。' },
+      { key: 'depth', label: '最大深度', type: 'number', defaultValue: 6, min: 2, max: 16, step: 1, integer: true, help: '限制单棵树复杂度。' },
+      { key: 'leaves', label: '叶子数', type: 'number', defaultValue: 31, min: 4, max: 256, step: 1, integer: true, help: '控制树的表达能力。' },
+      { key: 'lag', label: '最大滞后期', type: 'number', defaultValue: season * 2, min: 1, max: 366, step: 1, integer: true, help: '模型可使用的最远历史目标值。' }
+    ]
+  };
+  return schemas[type] || [];
+}
+function forecastDefaultParametersV1022(item, set = dataset()) { return Object.fromEntries(forecastParameterSchemaV1022(item.type, set).map(field => [field.key, field.defaultValue])); }
+function ensureForecastParametersV1022(item, set = dataset()) { item.parameters = { ...forecastDefaultParametersV1022(item, set), ...(item.parameters || {}) }; return item.parameters; }
+function forecastGridDefinitionsV1022(item, set = dataset()) {
+  const season = forecastSeasonPeriodV1022(set), definitions = {
+    forecast_ets: [{ key: 'trend', label: '趋势类型', values: 'none, add' }, { key: 'seasonalityMode', label: '季节性类型', values: 'add, mul' }, { key: 'season', label: '季节周期', values: String(season) }],
+    forecast_arima: [{ key: 'p', label: 'p', values: '0, 1, 2, 3' }, { key: 'd', label: 'd', values: '0, 1' }, { key: 'q', label: 'q', values: '0, 1, 2, 3' }],
+    forecast_prophet: [{ key: 'changepoint', label: '趋势灵活度', values: '0.01, 0.05, 0.1' }, { key: 'seasonality', label: '季节性强度', values: '1, 10, 20' }, { key: 'seasonalityMode', label: '季节性模式', values: 'additive, multiplicative' }],
+    forecast_lgbm: [{ key: 'trees', label: '树数量', values: '200, 300, 500' }, { key: 'learningRate', label: '学习率', values: '0.03, 0.05, 0.1' }, { key: 'depth', label: '最大深度', values: '4, 6, 8' }, { key: 'leaves', label: '叶子数', values: '15, 31, 63' }]
+  };
+  return definitions[item.type] || [];
+}
+function ensureForecastGridV1022(item, set = dataset()) {
+  item.forecastGridV1022 ||= {};
+  forecastGridDefinitionsV1022(item, set).forEach(field => { if (!(field.key in item.forecastGridV1022)) item.forecastGridV1022[field.key] = field.values; });
+  return item.forecastGridV1022;
+}
+function forecastGridFieldResultV1022(item, field, raw, set = dataset()) {
+  const schema = forecastParameterSchemaV1022(item.type, set).find(entry => entry.key === field.key), values = String(raw ?? '').split(',').map(value => value.trim()).filter(Boolean);
+  if (!values.length) return { valid: false, count: 0, message: '请至少填写一个候选值。' };
+  if (schema?.type === 'number') {
+    const numbers = values.map(Number), valid = numbers.every(value => Number.isFinite(value) && value >= schema.min && value <= schema.max && (!schema.integer || Number.isInteger(value)));
+    if (!valid) return { valid: false, count: values.length, message: `候选值需在 ${schema.min}–${schema.max} 范围内${schema.integer ? '且为整数' : ''}。` };
+  }
+  if (schema?.type === 'select' && values.some(value => !schema.options.some(option => option[0] === value))) return { valid: false, count: values.length, message: `可选值：${schema.options.map(option => option[0]).join('、')}。` };
+  return { valid: true, count: new Set(values).size, message: '' };
+}
+function forecastGridSummaryV1022(item, set = dataset(), root = null) {
+  const fields = forecastGridDefinitionsV1022(item, set), stored = ensureForecastGridV1022(item, set), results = fields.map(field => { const input = root?.querySelector(`[data-forecast-grid-v1022="${field.key}"]`); return forecastGridFieldResultV1022(item, field, input ? input.value : stored[field.key], set); }), count = results.every(result => result.valid) ? results.reduce((total, result) => total * result.count, 1) : 0;
+  return { valid: results.every(result => result.valid) && count <= 200, fieldResults: results, count, message: !results.every(result => result.valid) ? '请修正候选值。' : count > 200 ? '参数组合不能超过 200 组。' : `预计训练 ${count} 组参数组合。` };
+}
+function forecastParameterControlV1022(item, field, locked, set = dataset()) {
+  const value = ensureForecastParametersV1022(item, set)[field.key], disabled = locked || (field.advanced && item.parameters.seasonal === false);
+  if (field.type === 'select') return `<label><span>${esc(field.label)}</span><select data-forecast-param-v1022="${field.key}" ${disabled ? 'disabled' : ''}>${field.options.map(([key, label]) => `<option value="${key}" ${value === key ? 'selected' : ''}>${label}</option>`).join('')}</select><small>${esc(field.help)}</small></label>`;
+  if (field.type === 'boolean') return `<label class="forecast-boolean-param-v1022"><span>${esc(field.label)}</span><span class="toggle-line"><span class="switch"><input data-forecast-param-v1022="${field.key}" type="checkbox" ${value ? 'checked' : ''} ${disabled ? 'disabled' : ''}><span></span></span><b>${value ? '已开启' : '已关闭'}</b></span><small>${esc(field.help)}</small></label>`;
+  return `<label><span>${esc(field.label)}</span><input data-forecast-param-v1022="${field.key}" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}" ${disabled ? 'disabled' : ''}><small>${esc(field.help)}</small><small class="threshold-range-error" hidden></small></label>`;
+}
+forecastAdvancedParamsV10 = function (item, set) {
+  const locked = item.status === 'completed' && item.results?.length;
+  if (item.type === 'forecast_baseline') return `<section class="forecast-parameter-section-v1022"><div class="section-title"><div><h3>参与比较的基线方案</h3><p>基线实验会自动比较全部方案，不需要设置数值参数。</p></div></div><div class="forecast-baseline-candidates-v1022">${['历史均值', '最后值', '季节性最后值', '漂移', '移动平均'].map(label => `<span>${label}</span>`).join('')}</div></section>`;
+  const fields = forecastParameterSchemaV1022(item.type, set), common = fields.filter(field => !field.advanced), advanced = fields.filter(field => field.advanced);
+  return `<section class="forecast-parameter-section-v1022"><div class="section-title"><div><h3>常用参数</h3><p>仅展示当前模型可用的参数；修改后用于当前实验。</p></div>${locked ? '' : button('恢复默认参数', 'forecast-restore-params-v1022')}</div><div class="forecast-param-grid-v1022">${common.map(field => forecastParameterControlV1022(item, field, locked, set)).join('')}</div>${advanced.length ? `<details class="forecast-advanced-params-v1022"><summary>高级参数</summary><div class="forecast-param-grid-v1022">${advanced.map(field => forecastParameterControlV1022(item, field, locked, set)).join('')}</div></details>` : ''}</section>`;
+};
+function forecastAutoRangesV1022(item, set = dataset()) { return forecastGridDefinitionsV1022(item, set).map(field => `<span><b>${esc(field.label)}</b>${esc(field.values)}</span>`).join(''); }
+forecastTuningOptionsV10 = function (item) {
+  if (item.type === 'forecast_baseline') return `<div class="notice success"><b>自动比较</b><span>训练时比较五种基线方案，并按 3 轮平均 MAE 排名。</span></div>`;
+  const locked = item.status === 'completed' && item.results?.length, modes = [['none', '使用当前参数', '只训练左侧当前设置'], ['auto', '快速自动调参', '使用推荐范围自动搜索'], ['grid', '网格调参', '编辑候选值并比较全部组合']], grid = ensureForecastGridV1022(item), definitions = forecastGridDefinitionsV1022(item), summary = forecastGridSummaryV1022(item);
+  const detail = item.tuning === 'auto' ? `<div class="forecast-auto-ranges-v1022"><div><b>自动搜索范围</b><span>平台使用推荐范围，初学者无需选择搜索算法。</span></div><div>${forecastAutoRangesV1022(item)}</div></div>` : item.tuning === 'grid' ? `<div class="forecast-grid-settings-v1022"><div class="panel-head"><div><h3>网格候选值</h3><p>使用英文逗号分隔；最多 200 组组合。</p></div><b data-forecast-grid-count-v1022 class="${summary.valid ? '' : 'warning-text'}">${esc(summary.message)}</b></div><div class="forecast-grid-fields-v1022">${definitions.map((field, index) => `<label><span>${esc(field.label)}</span><input data-forecast-grid-v1022="${field.key}" value="${esc(grid[field.key])}" ${locked ? 'disabled' : ''}><small class="threshold-range-error" ${summary.fieldResults[index].valid ? 'hidden' : ''}>${esc(summary.fieldResults[index].message)}</small></label>`).join('')}</div></div>` : '';
+  return `<div class="tuning-options forecast-tuning-options-v10">${modes.map(([value, label, note]) => `<label class="${item.tuning === value ? 'selected' : ''}"><input data-forecast-tuning type="radio" name="forecast-tuning" value="${value}" ${item.tuning === value ? 'checked' : ''} ${locked ? 'disabled' : ''}><b>${label}${value === 'auto' ? ' <em>推荐</em>' : ''}</b><span>${note}</span></label>`).join('')}</div>${detail}`;
+};
 
+const forecastFeaturePageBeforeV1022 = forecastFeaturePageV10;
+forecastFeaturePageV10 = function () {
+  const set = ensureForecastDatasetV10(dataset()), enabled = set.forecastConfig.calendarFeatures, summary = set.forecastAutoFilterSummaryV1022;
+  return forecastFeaturePageBeforeV1022()
+    .replace(/<label class="switch"><input type="checkbox" data-forecast-calendar[^>]*><span><\/span><\/label>/, `<label class="forecast-calendar-control-v1022"><b>${enabled ? '已开启' : '已关闭'}</b><span class="switch"><input type="checkbox" data-forecast-calendar ${enabled ? 'checked' : ''}><span></span></span></label>`)
+    .replace('恢复推荐值', '恢复推荐阈值')
+    .replace('应用筛选', '自动筛选')
+    .replaceAll('>建议排除<', '>自动排除<')
+    .replace('<details class="metric-guide compact-guide">', `${summary ? `<div class="forecast-auto-filter-result-v1022"><b>最近一次自动筛选</b><span>纳入 ${summary.included} 个，排除 ${summary.excluded} 个；红色指标为主要排除原因。</span></div>` : ''}<details class="metric-guide compact-guide">`);
+};
+
+const startForecastTrainingBeforeV1022 = startForecastTrainingV10;
+startForecastTrainingV10 = function () {
+  const item = experiment(), invalid = [...app.querySelectorAll('[data-forecast-param-v1022]')].find(control => control.type === 'number' && (!control.value.trim() || !control.checkValidity()));
+  if (invalid) { invalid.classList.add('range-invalid'); invalid.focus(); return toast('请修正标红的模型参数。', 'warning'); }
+  if (item.tuning === 'grid') { const summary = forecastGridSummaryV1022(item, dataset(), app); if (!summary.valid) { forecastRefreshGridFeedbackV1022(item); app.querySelector('[data-forecast-grid-v1022].range-invalid')?.focus(); return toast(summary.message, 'warning'); } }
+  return startForecastTrainingBeforeV1022();
+};
+
+const actionBeforeForecastV1022 = action;
+action = function (name) {
+  if (isForecastingV10() && name === 'forecast-restore-params-v1022') { const item = experiment(); item.parameters = forecastDefaultParametersV1022(item); item.forecastGridV1022 = Object.fromEntries(forecastGridDefinitionsV1022(item).map(field => [field.key, field.values])); item.status = item.results?.length ? 'stale' : 'draft'; save(); render(); return setTimeout(() => toast('已恢复当前模型的默认参数。', 'success'), 0); }
+  if (isForecastingV10() && name === 'forecast-recommend-thresholds-v101') { const defaults = { missing: 90, variance: .01 }; app.querySelectorAll('[data-forecast-threshold]').forEach(input => { input.value = defaults[input.dataset.forecastThreshold]; forecastThresholdFeedbackV1011(input); }); return toast('已恢复推荐阈值，点击“自动筛选”后生效。', 'success'); }
+  if (isForecastingV10() && name === 'forecast-apply-thresholds-v101') {
+    const set = ensureForecastDatasetV10(dataset()), inputs = [...app.querySelectorAll('[data-forecast-threshold]')], valid = inputs.map(forecastThresholdFeedbackV1011); if (valid.some(value => !value)) { inputs[valid.findIndex(value => !value)]?.focus(); return toast('请修正标红的筛选阈值。', 'warning'); }
+    const values = Object.fromEntries(inputs.map(input => [input.dataset.forecastThreshold, Number(input.value)])); set.forecastFeatureThresholds = { ...set.forecastFeatureThresholds, ...values }; let included = 0, excluded = 0;
+    forecastExternalColumnsV101(set).forEach(column => { const meta = forecastFeatureStatsV101(set, column), passes = meta.trainable && meta.missingRate * 100 <= values.missing && (meta.variance === null || meta.variance >= values.variance); column.forecastMeta = meta; column.included = passes; passes ? included += 1 : excluded += 1; });
+    set.forecastAutoFilterSummaryV1022 = { included, excluded }; set.feature.revision = (set.feature.revision || 0) + 1; markForecastExperimentsStaleV10(set); save(); render(); return setTimeout(() => toast(`自动筛选完成：纳入 ${included} 个，排除 ${excluded} 个。`, 'success'), 0);
+  }
+  return actionBeforeForecastV1022(name);
+};
+
+function forecastParameterFeedbackV1022(control) {
+  if (control.type !== 'number') return true; const invalid = !control.value.trim() || !control.checkValidity(), message = control.closest('label')?.querySelector('.threshold-range-error'); control.classList.toggle('range-invalid', invalid); control.setAttribute('aria-invalid', String(invalid)); if (message) { message.textContent = invalid ? `请输入 ${control.min}–${control.max}${control.step === '1' ? ' 的整数' : ''}。` : ''; message.hidden = !invalid; } return !invalid;
+}
+function forecastRefreshGridFeedbackV1022(item) {
+  const definitions = forecastGridDefinitionsV1022(item), summary = forecastGridSummaryV1022(item, dataset(), app); app.querySelectorAll('[data-forecast-grid-v1022]').forEach((input, index) => { const result = summary.fieldResults[index], message = input.closest('label')?.querySelector('.threshold-range-error'); input.classList.toggle('range-invalid', !result.valid); input.setAttribute('aria-invalid', String(!result.valid)); if (message) { message.textContent = result.message; message.hidden = result.valid; } item.forecastGridV1022[definitions[index].key] = input.value; }); const output = app.querySelector('[data-forecast-grid-count-v1022]'); if (output) { output.textContent = summary.message; output.classList.toggle('warning-text', !summary.valid); } return summary.valid;
+}
+const bindBeforeForecastV1022 = bind;
+bind = function () {
+  bindBeforeForecastV1022(); if (!isForecastingV10()) return; const item = experiment();
+  const calendarCard = app.querySelector('.calendar-toggle-v10'), calendarInput = calendarCard?.querySelector('[data-forecast-calendar]');
+  calendarCard?.addEventListener('click', event => { if (event.target.closest('.forecast-calendar-control-v1022')) return; calendarInput?.click(); });
+  app.querySelectorAll('[data-forecast-param-v1022]').forEach(control => { const saveValue = () => { if (!forecastParameterFeedbackV1022(control)) return; ensureForecastParametersV1022(item); item.parameters[control.dataset.forecastParamV1022] = control.type === 'checkbox' ? control.checked : control.type === 'number' ? Number(control.value) : control.value; item.status = item.results?.length ? 'stale' : 'draft'; save(); if (control.type === 'checkbox' || control.tagName === 'SELECT') render(); }; control.addEventListener('input', () => forecastParameterFeedbackV1022(control)); control.addEventListener('change', saveValue); });
+  app.querySelectorAll('[data-forecast-grid-v1022]').forEach(control => control.addEventListener('input', () => { ensureForecastGridV1022(item); forecastRefreshGridFeedbackV1022(item); item.status = item.results?.length ? 'stale' : 'draft'; save(); }));
+};
+
+save();
+history.replaceState(null, '', routeHashV910());
+render();
